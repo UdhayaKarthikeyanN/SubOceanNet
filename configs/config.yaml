@@ -1,0 +1,133 @@
+# ============================================================================
+# OceanEmbed configuration -- single source of truth for the whole app.
+# Swap synthetic <-> real NetCDF data by editing ONLY this file.
+# ============================================================================
+
+project: oceanembed
+version: "1.0.0"
+
+# --- Region of interest (North Indian Ocean) --------------------------------
+region:
+  lat_min: 5.0
+  lat_max: 30.0
+  lon_min: 45.0
+  lon_max: 105.0
+
+grid:
+  resolution: 0.25        # degrees; target grid 101 lat x 241 lon
+
+depths_m: [0, 5, 10, 20, 30, 50, 75, 100, 125, 150, 200, 300, 500, 700, 1000]
+
+# --- The 7 surface input variables (NEVER predicted, only consumed) ---------
+input_variables:
+  - name: sst
+    long_name: Sea Surface Temperature
+    units: degC
+    valid_min: -2.0
+    valid_max: 40.0
+  - name: sss
+    long_name: Sea Surface Salinity
+    units: psu
+    valid_min: 25.0
+    valid_max: 40.0
+  - name: sla
+    long_name: Sea Level Anomaly
+    units: m
+    valid_min: -1.5
+    valid_max: 1.5
+  - name: cur_u
+    long_name: Surface Current U (eastward)
+    units: m/s
+    valid_min: -4.0
+    valid_max: 4.0
+  - name: cur_v
+    long_name: Surface Current V (northward)
+    units: m/s
+    valid_min: -4.0
+    valid_max: 4.0
+  - name: wind_u
+    long_name: Wind U (10 m, eastward)
+    units: m/s
+    valid_min: -25.0
+    valid_max: 25.0
+  - name: wind_v
+    long_name: Wind V (10 m, northward)
+    units: m/s
+    valid_min: -25.0
+    valid_max: 25.0
+
+# --- Data source -------------------------------------------------------------
+# type: "synthetic" -> physically plausible generated data (demo mode)
+#       "netcdf"     -> real files placed under paths below (no code edits!)
+data_source:
+  type: synthetic
+  netcdf:
+    # Files are looked up as <input_dir>/<variable_name>.nc using the
+    # variable names above (sst.nc, sss.nc, ...). Each file must have dims
+    # (time, lat, lon) or (time, latitude, longitude).
+    input_dir: data/raw
+    reference_dir: data/reference   # GLORYS12V / ARGO style file with 'temperature' (time, depth, lat, lon)
+    time_coord: time
+    depth_coord: depth
+
+time_range:
+  start: "2022-01-01"
+  end: "2023-12-31"      # synthetic generator writes daily steps over this range
+
+model:
+  encoder_type: cnn       # "cnn" | "vit"
+  latent_dim: 256
+  cnn_channels: [32, 64, 128]
+  vit:                    # used when encoder_type == "vit"
+    embed_dim: 128
+    patch_size: 3
+    num_layers: 3
+    num_heads: 4
+    mlp_ratio: 2.0
+  decoder_hidden: [512, 256]
+  dropout: 0.20           # also reused for MC-dropout uncertainty at inference
+
+inference:
+  patch_size: 9           # odd number; spatial neighbourhood fed to encoder
+  mc_passes: 8            # >= 5 stochastic passes for uncertainty
+  batch_size: 1024
+  max_region_cells: 10000 # hard cap per prediction request
+  max_timeseries_dates: 120
+
+training:
+  holdout_last_days: 365  # final block of days reserved for validation (time split!)
+  preload_day_stride: 4   # subsample days loaded into RAM for speed
+  val_center_stride: 6    # spacing of evaluation grid cells
+  epochs: 12              # full training
+  steps_per_epoch: 300
+  batch_size: 64
+  lr: 0.0015
+  weight_decay: 0.0001
+  target_noise_sigma: 0.12  # ARGO-like noise added to truth profiles during training
+  seed: 42
+  auto:                   # "first-run demo model" profile used by backend auto-train
+    epochs: 3
+    steps_per_epoch: 150
+    preload_day_stride: 8
+
+paths:
+  checkpoints_dir: data/checkpoints
+  bundle_name: oceanembed_demo
+  scalars_file: scalars.json      # inside bundle dir
+  cache_dir: data/cache
+  synthetic_dir: data/synthetic
+
+api:
+  host: 127.0.0.1
+  port: 8000
+
+presets:
+  - id: arabian_sea
+    name: Arabian Sea
+    bbox: [52.0, 5.0, 75.0, 27.0]     # lon_min, lat_min, lon_max, lat_max
+  - id: bay_of_bengal
+    name: Bay of Bengal
+    bbox: [78.0, 5.0, 98.0, 25.0]
+  - id: equatorial_io
+    name: Equatorial Indian Ocean
+    bbox: [50.0, 5.0, 100.0, 12.0]

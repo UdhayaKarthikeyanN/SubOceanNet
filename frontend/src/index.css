@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@theme {
+  --color-abyss: #070d1a;
+  --color-panel: #0d1526;
+  --color-panel2: #111c31;
+  --color-edge: #1c2b45;
+  --color-ink: #dbe4f3;
+  --color-muted: #7d8db0;
+  --color-cyan-glow: #22d3ee;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-abyss);
+  color: var(--color-ink);
+  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+/* thin dark scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #24365a transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #24365a;
+  border-radius: 8px;
+}
+
+/* Leaflet dark tweaks */
+.leaflet-container {
+  background: #08101f !important;
+  font-family: inherit;
+}
+.leaflet-control-attribution {
+  display: none;
+}
+.leaflet-bar,
+.leaflet-draw-toolbar a {
+  background-color: #101b30 !important;
+  color: #cbd5ea !important;
+  border-color: #1c2b45 !important;
+}
+.leaflet-draw-tooltip {
+  background: #101b30;
+  border: 1px solid #1c2b45;
+  color: #dbe4f3;
+}
+.oe-raster {
+  pointer-events: none;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+}
+
+@keyframes oe-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.oe-pulse {
+  animation: oe-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes oe-slide-in {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.oe-toast {
+  animation: oe-slide-in 0.25s ease-out;
+}

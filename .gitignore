@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+data/raw/
+data/synthetic/
+data/reference/
+data/checkpoints/
+data/cache/
+.run/
+frontend/node_modules/
+frontend/dist/
+*.log
+.DS_Store
