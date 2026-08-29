@@ -152,6 +152,15 @@ paths:
   cache_dir: data/cache
   synthetic_dir: data/synthetic
 
+# Time Series specifically reads from here instead of data_source.type, so
+# it has a real multi-day trend to show regardless of mode (live mode's
+# actual availability is often just a single "latest" composite day - see
+# README "Live data mode"). Independent of data_source.type; not affected
+# by switching that between synthetic/netcdf/live. Regenerate with:
+#   .venv\Scripts\python.exe -c "from datetime import date; from pathlib import Path; from src.config import load_config; from src.data.generate_synthetic import generate; cfg = load_config(); generate(date(2025,1,1), date.today(), Path(cfg['_root'])/'data'/'timeseries_history', cfg['grid']['resolution'], cfg['depths_m'], seed=42)"
+timeseries_history:
+  dir: data/timeseries_history
+
 api:
   host: 127.0.0.1
   port: 8000

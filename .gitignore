@@ -6,6 +6,7 @@ venv/
 .pytest_cache/
 data/raw/
 data/synthetic/
+data/timeseries_history/
 data/reference/
 data/checkpoints/
 data/cache/

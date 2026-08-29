@@ -174,8 +174,11 @@ def valid_region(geojson: dict, cfg=None, enforce_cap: bool = True) -> tuple[Reg
     return region, mask
 
 
-def valid_date(date_str: str | None, cfg=None) -> str:
-    start, end = data_loaders.available_date_range(cfg or get_config())
+def valid_date(date_str: str | None, cfg=None, date_range: tuple[str, str] | None = None) -> str:
+    """Validate/default a date string. `date_range` overrides the normal
+    data_source.type-derived range - used by /api/timeseries, which reads
+    from the separate Time Series history archive instead."""
+    start, end = date_range if date_range is not None else data_loaders.available_date_range(cfg or get_config())
     if date_str is None or date_str == "":
         return end
     try:
@@ -473,12 +476,24 @@ def timeseries(lat: float = Query(None), lon: float = Query(None),
                depth: float = Query(...), start: str | None = Query(None),
                end: str | None = Query(None), stride_days: int = Query(10, ge=1, le=60),
                region: str | None = Query(None)):
-    """Predicted temperature through time at a point (or polygon mean)."""
+    """Predicted temperature through time at a point (or polygon mean).
+
+    Always reads from the fixed 2025-2026 Time Series history archive
+    (data_source.timeseries_history), independent of data_source.type -
+    live mode's actual availability is often just a single "latest"
+    composite day (see README "Live data mode"), which isn't enough to
+    plot a trend. Input Layers/Prediction Maps/3D Volume are unaffected -
+    they still use whatever data_source.type currently is.
+    """
     cfg = get_config()
     predictor = require_model()
-    rng = cfg["time_range"]
-    start = valid_date(start or rng["start"], cfg)
-    end = valid_date(end or rng["end"], cfg)
+    try:
+        hist_ds = data_loaders.load_timeseries_history_dataset(cfg)
+        hist_range = data_loaders.timeseries_history_date_range(cfg)
+    except FileNotFoundError as e:
+        abort(503, f"time series history not ready: {e}")
+    start = valid_date(start or hist_range[0], cfg, date_range=hist_range)
+    end = valid_date(end or hist_range[1], cfg, date_range=hist_range)
     if dt_date.fromisoformat(start) > dt_date.fromisoformat(end):
         abort(400, "start date is after end date")
 
@@ -499,7 +514,7 @@ def timeseries(lat: float = Query(None), lon: float = Query(None),
 
     try:
         ts = predictor.timeseries(lat, lon, start, end, stride_days=stride_days,
-                                  region=reg, progress_cb=cb)
+                                  region=reg, progress_cb=cb, ds=hist_ds)
     except (FileNotFoundError, ValueError) as e:
         abort(503, f"input data not ready: {e}")
     temps = np.asarray([[np.nan if v is None else v for v in row] for row in ts["temperature"]],
@@ -511,10 +526,12 @@ def timeseries(lat: float = Query(None), lon: float = Query(None),
 
     series = [None if not np.isfinite(v) else round(float(v), 3) for v in temps[:, k]]
 
-    # reference overlay
+    # reference overlay - the SAME 2025-2026 archive's clean truth, not
+    # data_loaders.load_reference_dataset() (which tracks data_source.type
+    # and would compare against a mismatched time period)
     ref_series, ref_label = None, None
     try:
-        ref_ds, ref_label = data_loaders.load_reference_dataset(cfg)
+        ref_ds = data_loaders.load_timeseries_history_reference(cfg)
         refs = []
         with NETCDF_IO_LOCK:  # ref_ds is lazy - this is where the actual reads happen
             times = ref_ds["time"].values.astype("datetime64[D]")
@@ -529,13 +546,13 @@ def timeseries(lat: float = Query(None), lon: float = Query(None),
                 else:
                     v = float(da.sel(lat=lat, lon=lon, method="nearest").values)
                 refs.append(round(v, 3))
-        ref_series, ref_label = refs, ref_label
+        ref_series, ref_label = refs, "SYNTHETIC REFERENCE - DEMO MODE"
     except Exception:
         ref_series, ref_label = None, None
 
     return {
         "lat": lat, "lon": lon, "depth_m": ts["depths"][k], "area_mean": bool(reg is not None),
-        "dates": ts["dates"], "temperature": series,
+        "dates": ts["dates"], "depths": ts["depths"], "temperature": series,
         "reference_temperature": ref_series, "reference_type": ref_label,
         "units": "degC", "all_depths_matrix": ts["temperature"],
         "stage": "prediction",
@@ -550,21 +567,34 @@ def timeseries(lat: float = Query(None), lon: float = Query(None),
 def validation(region: str = Query(..., description="GeoJSON Polygon (URL-encoded JSON)"),
                date: str | None = Query(None), start: str | None = Query(None),
                end: str | None = Query(None), scatter_depth: float = Query(100)):
-    """Metrics vs reference over region/time; JSON-cached by (dates, region)."""
+    """Metrics vs reference over region/time; JSON-cached by (dates, region).
+
+    Like /api/timeseries, this always reads from the fixed 2025-2026 Time
+    Series history archive rather than data_source.type: predicting for
+    "today" in live mode and comparing against a reference dataset that
+    only covers 2022-2023 (its nearest-available-date fallback) compares
+    two unrelated time periods and produces a meaningless systematic
+    offset, not real skill metrics. Input Layers/Prediction Maps/3D Volume
+    are unaffected - they still use whatever data_source.type currently is.
+    """
     from src.validation.metrics import (band_skill, cache_key, load_cache,
                                         per_depth_metrics, save_cache, scatter_samples)
 
     cfg = get_config()
     predictor = require_model()
     reg, mask = valid_region(_parse_json_param(region, "region"), cfg, enforce_cap=False)
-    avail_start, avail_end = data_loaders.available_date_range(cfg)
-    start = valid_date(start or date or avail_end, cfg)
-    end = valid_date(end or start, cfg)
+    try:
+        hist_ds = data_loaders.load_timeseries_history_dataset(cfg)
+        hist_range = data_loaders.timeseries_history_date_range(cfg)
+    except FileNotFoundError as e:
+        abort(503, f"time series history not ready: {e}")
+    start = valid_date(start or date or hist_range[1], cfg, date_range=hist_range)
+    end = valid_date(end or start, cfg, date_range=hist_range)
     if dt_date.fromisoformat(start) > dt_date.fromisoformat(end):
         abort(400, "start date is after end date")
 
     key = cache_key({"r": sorted(map(tuple, reg.ring)), "s": start, "e": end,
-                     "v": predictor.meta.get("model_version")})
+                     "v": predictor.meta.get("model_version"), "hist": True})
     cached = load_cache(cfg["paths"]["cache_dir"], key)
     if cached:
         return cached
@@ -574,7 +604,8 @@ def validation(region: str = Query(..., description="GeoJSON Polygon (URL-encode
     if len(dr) > 8:
         dr = dr[np.unique(np.linspace(0, len(dr) - 1, 8).astype(int))]
     preds, refs = [], []
-    ref_ds, ref_label = data_loaders.load_reference_dataset(cfg)
+    ref_ds = data_loaders.load_timeseries_history_reference(cfg)
+    ref_label = "SYNTHETIC REFERENCE - DEMO MODE"
     with NETCDF_IO_LOCK:  # ref_ds is lazy - just the initial coordinate read
         ref_times = ref_ds["time"].values.astype("datetime64[D]")
     for d in dr:
@@ -583,7 +614,7 @@ def validation(region: str = Query(..., description="GeoJSON Polygon (URL-encode
         # CPU-bound) plus its own brief internal NETCDF_IO_LOCK use for live
         # mode (see src/data/live/cache.py) - holding this loop's lock across
         # it would needlessly serialize inference across concurrent requests.
-        res = predictor.predict_region(ds_, reg, mc_passes=1)
+        res = predictor.predict_region(ds_, reg, mc_passes=1, ds=hist_ds)
         pred_field = np.asarray(res["temperature"], dtype=np.float64)
         target = np.datetime64(res["date"], "D")
         with NETCDF_IO_LOCK:  # ref_ds is lazy - this is where the actual reads happen
@@ -612,13 +643,13 @@ def validation(region: str = Query(..., description="GeoJSON Polygon (URL-encode
         "date_start": str(dr[0].date()), "date_end": str(dr[-1].date()),
         "days_sampled": len(dr), "region_cells": int(mask.sum()),
         "reference_type": ref_label,
-        "demo_mode": cfg["data_source"]["type"] == "synthetic",
+        # always true: validation always compares against the synthetic
+        # 2025-2026 history archive, regardless of data_source.type
+        "demo_mode": True,
         "metrics": metrics, "bands": bands,
         "scatter": {"depth": scatter_depth,
                     "points": scatter_samples(P, R, cfg_depths(cfg), scatter_depth)},
-        "skill_note": ("SYNTHETIC REFERENCE - DEMO MODE" if ref_label ==
-                       "SYNTHETIC REFERENCE - DEMO MODE"
-                       else "Validated against reference dataset under data/reference/"),
+        "skill_note": "SYNTHETIC REFERENCE - DEMO MODE (2025-2026 Time Series history archive)",
     }
     save_cache(cfg["paths"]["cache_dir"], key, json.loads(json.dumps(payload, default=float)))
     return json.loads(json.dumps(payload, default=float))

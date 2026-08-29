@@ -170,3 +170,68 @@ def nearest_date_index(ds: xr.Dataset, date_str: str) -> int:
     times = ds["time"].values.astype("datetime64[ns]")
     idx = int(np.argmin(np.abs(times - target)))
     return idx
+
+
+# ---------------------------------------------------------------------------
+# Time Series history - independent of data_source.type (see config.yaml
+# "timeseries_history" comment). A fixed 2025-2026 synthetic archive so the
+# Time Series view always has a real multi-day trend to show, regardless of
+# whether the app is in synthetic/netcdf/live mode elsewhere.
+# ---------------------------------------------------------------------------
+
+def timeseries_history_dir(cfg=None) -> Path:
+    cfg = cfg or get_config()
+    p = Path(cfg.get("timeseries_history", {}).get("dir", "data/timeseries_history"))
+    if not p.is_absolute():
+        p = Path(cfg["_root"]) / p
+    return p
+
+
+_TS_HISTORY_CACHE: dict = {}
+
+
+def load_timeseries_history_dataset(cfg=None) -> xr.Dataset:
+    """The 7 surface input variables from the fixed 2025-2026 synthetic
+    archive, in the same canonical shape load_input_dataset() returns.
+    Cached after the first call - ~180MB, unlike the live/netcdf paths this
+    file never changes at runtime, so there is no reason to re-read it."""
+    cfg = cfg or get_config()
+    path = timeseries_history_dir(cfg) / "inputs.nc"
+    cached = _TS_HISTORY_CACHE.get(str(path))
+    if cached is not None:
+        return cached
+    names = input_variable_names(cfg)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Time series history dataset not found at {path}. Generate it with the "
+            f"command in configs/config.yaml's timeseries_history comment."
+        )
+    with NETCDF_IO_LOCK:
+        ds = xr.open_dataset(path, engine="netcdf4").load()
+    missing = [n for n in names if n not in ds]
+    if missing:
+        raise ValueError(f"Time series history inputs.nc missing variables: {missing}")
+    ds = _standardize(ds, "time", "depth")[names]
+    _TS_HISTORY_CACHE[str(path)] = ds
+    return ds
+
+
+def timeseries_history_date_range(cfg=None) -> tuple[str, str]:
+    cfg = cfg or get_config()
+    man = timeseries_history_dir(cfg) / "manifest.json"
+    if man.exists():
+        m = json.loads(man.read_text())
+        return m["date_range"][0], m["date_range"][1]
+    raise FileNotFoundError(f"Time series history manifest not found under {timeseries_history_dir(cfg)}")
+
+
+def load_timeseries_history_reference(cfg=None) -> xr.Dataset:
+    """Clean synthetic truth for the same 2025-2026 archive (kept lazy -
+    the caller only ever touches a handful of points/slices from it)."""
+    cfg = cfg or get_config()
+    path = timeseries_history_dir(cfg) / "truth.nc"
+    if not path.exists():
+        raise FileNotFoundError(f"Time series history truth.nc not found at {path}")
+    with NETCDF_IO_LOCK:
+        ds = xr.open_dataset(path, engine="netcdf4")
+    return _standardize(ds, "time", "depth")[["temperature"]]

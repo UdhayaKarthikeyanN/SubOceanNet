@@ -157,14 +157,14 @@ class Predictor:
         return mean_n * t_std + t_mean, std_n * t_std
 
     # -- public API ----------------------------------------------------------
-    def _preprocess(self, date_str: str, region: Region) -> dict:
+    def _preprocess(self, date_str: str, region: Region, ds: object = None) -> dict:
         return preprocess_for_inference(self.cfg, date_str, region,
-                                        scalars=self.scalars, ds=self.ds)
+                                        scalars=self.scalars, ds=ds if ds is not None else self.ds)
 
     def predict_region(self, date_str: str, region: Region, mc_passes: int | None = None,
-                       progress_cb=None) -> dict:
+                       progress_cb=None, ds: object = None) -> dict:
         t0 = time.time()
-        pre = self._preprocess(date_str, region)
+        pre = self._preprocess(date_str, region, ds=ds)
         if progress_cb:
             progress_cb(15, f"preprocessed {pre['tensor'].shape[1]}x{pre['tensor'].shape[2]} cells")
         patches = self._patches_full_grid(pre["tensor"])
@@ -210,11 +210,13 @@ class Predictor:
         return json_safe(result)
 
     def predict_points(self, points: list[tuple[float, float]], date_str: str,
-                       mc_passes: int | None = None) -> dict:
+                       mc_passes: int | None = None, ds: object = None) -> dict:
         """Profile(s) at specific lat/lon point(s) for one date.
 
         Each point is served from a small (patch-sized) neighbourhood crop so
-        the cost is independent of domain size.
+        the cost is independent of domain size. `ds` overrides which surface
+        dataset is used (defaults to self.ds) - e.g. the fixed Time Series
+        history archive instead of whatever data_source.type currently is.
         """
         res_deg = float(self.cfg["grid"]["resolution"])
         r_cells = (self.patch - 1) // 2
@@ -224,7 +226,7 @@ class Predictor:
         for la, lo in points:
             region = Region(ring=[[lo - half, la - half], [lo + half, la - half],
                                   [lo + half, la + half], [lo - half, la + half]])
-            pre = self._preprocess(date_str, region)
+            pre = self._preprocess(date_str, region, ds=ds)
             lats = np.asarray(pre["lats"]); lons = np.asarray(pre["lons"])
             iy = int(np.argmin(np.abs(lats - la))); ix = int(np.argmin(np.abs(lons - lo)))
             t = pre["tensor"]
@@ -252,7 +254,7 @@ class Predictor:
         first_date = None
         try:
             import numpy as _np
-            tvals = self.ds["time"].values.astype("datetime64[D]")
+            tvals = (ds if ds is not None else self.ds)["time"].values.astype("datetime64[D]")
             target = _np.datetime64(date_str, "D")
             first_date = str(_np.datetime_as_string(tvals[int(np.argmin(np.abs(tvals - target)))], unit="D"))
         except Exception:
@@ -265,12 +267,14 @@ class Predictor:
 
     def timeseries(self, lat: float, lon: float, start: str, end: str,
                    stride_days: int = 7, region: Region | None = None,
-                   progress_cb=None) -> dict:
+                   progress_cb=None, ds: object = None) -> dict:
         """Predicted temperature time series at a point (all depths).
 
-        With ``region`` set, returns the polygon-mean series instead.
+        With ``region`` set, returns the polygon-mean series instead. `ds`
+        overrides which surface dataset every date is served from (defaults
+        to self.ds) - e.g. the fixed Time Series history archive instead of
+        whatever data_source.type currently is.
         """
-        dates_all, _ = data_loaders.available_date_range(self.cfg)
         dr = np.arange(np.datetime64(start), np.datetime64(end) + np.timedelta64(1, "D"),
                        np.timedelta64(int(stride_days), "D"))
         cap = int(self.cfg["inference"].get("max_timeseries_dates", 120))
@@ -282,11 +286,11 @@ class Predictor:
         for i, d in enumerate(dr):
             ds_ = str(np.datetime_as_string(d, unit="D"))
             if region is not None:
-                res = self.predict_region(ds_, region, mc_passes=1)
+                res = self.predict_region(ds_, region, mc_passes=1, ds=ds)
                 field = np.asarray(res["temperature"], dtype=np.float64)
                 vals = np.nanmean(field.reshape(len(self.depths), -1), axis=1)
             else:
-                res = self.predict_points([(float(lat), float(lon))], ds_, mc_passes=1)
+                res = self.predict_points([(float(lat), float(lon))], ds_, mc_passes=1, ds=ds)
                 vals = np.asarray(res["points"][0]["temperature"])
             temps.append([None if v is None or (isinstance(v, float) and not np.isfinite(v)) else float(v)
                           for v in vals])

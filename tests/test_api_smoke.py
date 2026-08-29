@@ -123,8 +123,12 @@ def test_timeseries_endpoint(api_client):
 
 
 def test_validation_endpoint_metrics(api_client):
+    # /api/validation always reads from the fixed 2025-2026 timeseries
+    # history archive (see configs/config.yaml "timeseries_history"),
+    # independent of data_source.type - so the date must fall in that
+    # range, not the tiny test config's synthetic 2023 range.
     r = api_client.get("/api/validation", params={"region": json.dumps(BOX),
-                                                  "date": "2023-01-12"})
+                                                  "date": "2025-06-15"})
     assert r.status_code == 200
     v = r.json()
     assert v["reference_type"].upper().startswith("SYNTHETIC")
