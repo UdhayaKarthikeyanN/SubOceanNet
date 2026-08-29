@@ -305,6 +305,41 @@ def live_latest():
     return json_safe(latest_payload(cfg))
 
 
+@app.post("/api/live/refresh")
+def live_refresh():
+    """Manually force a fresh recache of all 7 live variables right now,
+    bypassing the normal refresh_interval_minutes freshness-skip. Runs in a
+    background thread (a real fetch takes minutes) and returns immediately;
+    poll /api/live/status (its "refreshing" flag and per-variable
+    fetched_at) to watch it land."""
+    cfg = get_config()
+    if cfg["data_source"]["type"] != "live":
+        abort(400, "data_source.type is not 'live' - nothing to refresh")
+    from src.data.live.manager import get_manager
+
+    started = get_manager(cfg).trigger_manual_refresh()
+    return {
+        "started": started,
+        "message": "refresh started - poll /api/live/status for progress" if started
+                   else "a refresh is already in progress",
+    }
+
+
+@app.post("/api/live/clear_cache")
+def live_clear_cache():
+    """Delete all cached live data now. The app keeps working immediately
+    afterward (an instant synthetic snapshot backfills each variable) while
+    the next real fetch - background cadence or a manual /api/live/refresh
+    - repopulates it."""
+    cfg = get_config()
+    if cfg["data_source"]["type"] != "live":
+        abort(400, "data_source.type is not 'live' - no live cache to clear")
+    from src.data.live.manager import get_manager
+
+    removed = get_manager(cfg).clear_cache()
+    return {"cleared": removed}
+
+
 # ---------------------------------------------------------------------------
 # Input layers
 # ---------------------------------------------------------------------------

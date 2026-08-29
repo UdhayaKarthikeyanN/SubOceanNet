@@ -3,7 +3,6 @@ import { AppProvider, useApp, type TabId } from "./state/AppContext";
 import PipelineBanner from "./components/PipelineBanner";
 import MapPanel from "./components/MapCanvas";
 import ToastHost from "./components/ToastHost";
-import Legend from "./components/Legend";
 import { Badge } from "./components/ui";
 import LiveStatusBadge from "./components/LiveStatusBadge";
 import InputLayersView from "./views/InputLayersView";
@@ -50,7 +49,7 @@ function ModelStatusChip() {
 
 function Shell() {
   const {
-    meta, date, setDate, tab, setTab, mapLayer,
+    meta, date, setDate, tab, setTab,
   } = useApp();
 
   const dateRange = meta?.date_range;
@@ -68,9 +67,6 @@ function Shell() {
           </svg>
           <div className="leading-tight">
             <h1 className="text-sm font-extrabold tracking-[0.18em] text-[#dbe4f3]">SUBOCEAN<span className="text-cyan-300">NET</span></h1>
-            <p className="text-[10px] text-[#66779b]">
-              satellite surfaces → latent embedding → subsurface temperature · NIO 5–30°N / 45–105°E
-            </p>
           </div>
         </div>
 
@@ -129,19 +125,6 @@ function Shell() {
           </div>
         </section>
       </main>
-
-      {/* floating legend for the active raster */}
-      {mapLayer && (
-        <div className="pointer-events-none fixed bottom-16 left-4 z-[600] hidden lg:block">
-          <Legend
-            kind={mapLayer.kind}
-            min={mapLayer.min}
-            max={mapLayer.max}
-            units={mapLayer.units}
-            title={mapLayer.title}
-          />
-        </div>
-      )}
 
       <ToastHost />
     </div>

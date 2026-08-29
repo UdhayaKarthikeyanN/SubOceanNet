@@ -1,6 +1,8 @@
 import type {
   LayerData,
+  LiveClearCacheResponse,
   LiveLatestResponse,
+  LiveRefreshResponse,
   LiveStatusResponse,
   MetaResponse,
   ModelInfo,
@@ -109,6 +111,10 @@ export const api = {
   getLiveStatus: () => j<LiveStatusResponse>("/api/live/status"),
 
   getLiveLatest: () => j<LiveLatestResponse>("/api/live/latest"),
+
+  refreshLiveData: () => j<LiveRefreshResponse>("/api/live/refresh", { method: "POST" }),
+
+  clearLiveCache: () => j<LiveClearCacheResponse>("/api/live/clear_cache", { method: "POST" }),
 };
 
 export async function pollJob(

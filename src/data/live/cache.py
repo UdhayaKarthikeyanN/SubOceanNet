@@ -92,3 +92,22 @@ def read_variable_cache(cfg: dict, name: str) -> xr.DataArray | None:
         return None
     with _IO_LOCK, xr.open_dataarray(path) as da:
         return da.load()
+
+
+def clear_cache(cfg: dict) -> list[str]:
+    """Delete every cached variable file (and any leftover .tmp.nc from an
+    interrupted write) plus the manifest. Returns the variable names that
+    had a cache file removed. Safe to call while a background refresh is
+    in flight - append_timestep() recreates a variable's file from scratch
+    the next time it writes, same as if it had never been fetched."""
+    d = cache_dir(cfg)
+    removed: list[str] = []
+    with _IO_LOCK:
+        if d.exists():
+            for p in d.glob("*.nc"):
+                p.unlink(missing_ok=True)
+                removed.append(p.stem)
+            for p in d.glob("*.tmp.nc"):
+                p.unlink(missing_ok=True)
+            manifest_path(cfg).unlink(missing_ok=True)
+    return removed

@@ -78,6 +78,7 @@ class LiveDataManager:
         self._status: dict[str, dict] = {}
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._refreshing = False
 
     # -- status ---------------------------------------------------------------
     def status_snapshot(self) -> dict:
@@ -122,7 +123,7 @@ class LiveDataManager:
         live_cache.append_timestep(cfg, name, da, max_timesteps=max_ts)
 
     # -- per-variable refresh ---------------------------------------------------
-    def _refresh_one(self, name: str) -> dict:
+    def _refresh_one(self, name: str, force: bool = False) -> dict:
         cfg = self.cfg
         live = cfg["data_source"]["live"]
         max_age_h = float(live.get("max_age_hours", 48))
@@ -134,9 +135,11 @@ class LiveDataManager:
         # on-disk cache was already successfully fetched more recently than
         # that, skip the network round-trip entirely (this is what makes
         # repeated app restarts instant instead of re-paying a multi-minute
-        # live fetch every time - see README "Live data mode").
+        # live fetch every time - see README "Live data mode"). A manual
+        # "recache now" request (force=True) bypasses this so it actually
+        # re-fetches instead of silently no-op'ing.
         cache_path = live_cache.variable_cache_path(cfg, name)
-        if cache_path.exists():
+        if cache_path.exists() and not force:
             age_since_fetch_h = (time.time() - cache_path.stat().st_mtime) / 3600.0
             if age_since_fetch_h < refresh_interval_h:
                 cached = live_cache.read_variable_cache(cfg, name)
@@ -211,17 +214,19 @@ class LiveDataManager:
             }
 
     # -- bulk refresh (background thread) ----------------------------------------
-    def refresh_all(self) -> None:
+    def refresh_all(self, force: bool = False) -> bool:
         """Fetch all 7 variables concurrently. Guarded by a non-blocking
         lock: if a refresh is already in flight (background thread overlaps
         a manual call, or one cycle runs longer than the interval), this
         call is skipped rather than racing the same _incoming_<var>.nc temp
-        files, which corrupts the on-disk cache."""
+        files, which corrupts the on-disk cache. Returns True if a refresh
+        cycle actually ran, False if one was already in progress."""
         if not self._refresh_lock.acquire(blocking=False):
-            return
+            return False
+        self._refreshing = True
         try:
             with ThreadPoolExecutor(max_workers=len(ALL_VARS)) as ex:
-                futures = {ex.submit(self._refresh_one, name): name for name in ALL_VARS}
+                futures = {ex.submit(self._refresh_one, name, force): name for name in ALL_VARS}
                 for fut, name in futures.items():
                     try:
                         status = fut.result()
@@ -230,8 +235,40 @@ class LiveDataManager:
                                   "observation_time": _now_iso(), "fetched_at": _now_iso(),
                                   "stale": False, "error": str(exc)}
                     self._set_status(name, status)
+            return True
         finally:
+            self._refreshing = False
             self._refresh_lock.release()
+
+    def is_refreshing(self) -> bool:
+        return self._refreshing
+
+    def trigger_manual_refresh(self) -> bool:
+        """Kick off a forced (cache-bypassing) refresh of all 7 variables in
+        a background thread and return immediately - a real fetch can take
+        minutes, far too long for an HTTP request to hold open. Callers
+        poll status_payload()/is_refreshing() (see /api/live/status) to
+        watch it land. Returns False without starting anything if a refresh
+        (background-cadence or another manual one) is already in flight."""
+        if self._refreshing:
+            return False
+        t = threading.Thread(
+            target=lambda: self.refresh_all(force=True), name="oe-live-manual-refresh", daemon=True
+        )
+        t.start()
+        return True
+
+    def clear_cache(self) -> list[str]:
+        """Delete all cached live data now. Immediately backfills an
+        instant synthetic snapshot per variable (same safety net as
+        ensure_not_empty) so the app keeps working while the next real
+        fetch - background cadence or a manual refresh - catches up.
+        Returns the variable names whose cache file was removed."""
+        removed = live_cache.clear_cache(self.cfg)
+        with self._lock:
+            self._status = {}
+        self.ensure_not_empty()
+        return removed
 
     def ensure_not_empty(self) -> None:
         """Fast, non-blocking guarantee that every variable's cache has at
@@ -334,6 +371,7 @@ def status_payload(cfg: dict) -> dict:
         "live_mode_active": cfg["data_source"]["type"] == "live",
         "refresh_interval_minutes": live_cfg.get("refresh_interval_minutes"),
         "max_age_hours": live_cfg.get("max_age_hours"),
+        "refreshing": mgr.is_refreshing(),
         "variables": mgr.status_snapshot(),
     }
 

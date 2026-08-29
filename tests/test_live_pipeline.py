@@ -375,3 +375,145 @@ def test_live_status_endpoint_inert_outside_live_mode(test_env, monkeypatch):
         r = client.get("/api/live/status")
         assert r.status_code == 200
         assert r.json()["live_mode_active"] is False
+
+
+# ---------------------------------------------------------------------------
+# Manual "recache now" / "clear cache" actions
+# ---------------------------------------------------------------------------
+
+def test_manual_refresh_force_bypasses_freshness_skip(live_cfg):
+    """A manual "recache now" action must re-fetch even when the on-disk
+    cache is still well within refresh_interval_minutes - unlike the normal
+    background cadence, which correctly skips re-fetching in that case (see
+    test_fresh_cache_skips_refetch_and_reports_cached_real)."""
+    from src.data.live import manager as mgr_mod, providers
+    from src.data.live.status import REAL
+
+    mgr = mgr_mod.get_manager(live_cfg)
+    fake = _fake_fetch_factory(live_cfg)
+    calls = {"n": 0}
+
+    def counting_fake(cfg_, name):
+        calls["n"] += 1
+        return fake(cfg_, name)
+
+    with mock.patch.object(providers, "fetch_ocean_variable", side_effect=counting_fake), \
+         mock.patch.object(providers, "fetch_wind_variable", side_effect=counting_fake):
+        mgr.refresh_all()
+        first_call_count = calls["n"]
+        assert first_call_count == len(mgr_mod.ALL_VARS)
+
+        mgr.refresh_all(force=True)  # cache is seconds old, but force=True must still hit the network
+        assert calls["n"] == first_call_count * 2, "force=True must bypass the freshness-skip"
+        assert all(v["source"] == REAL for v in mgr.status_snapshot().values())
+
+
+def test_clear_cache_removes_files_and_backfills_fallback(live_cfg):
+    """Clearing the cache must wipe the previously-fetched REAL data (proven
+    by the returned `removed` list and the status flipping off REAL) but
+    keep the app usable immediately afterward via the same
+    synthetic-fallback safety net ensure_not_empty() already provides for a
+    never-fetched variable - which itself writes a fresh (synthetic) cache
+    file, so a file existing again right after clear_cache() is expected,
+    not a sign the clear didn't happen."""
+    from src.data.live import cache as live_cache, manager as mgr_mod, providers
+    from src.data.live.status import REAL, SYNTHETIC_FALLBACK
+
+    mgr = mgr_mod.get_manager(live_cfg)
+    fake = _fake_fetch_factory(live_cfg)
+    with mock.patch.object(providers, "fetch_ocean_variable", side_effect=fake), \
+         mock.patch.object(providers, "fetch_wind_variable", side_effect=fake):
+        mgr.refresh_all()
+
+    for name in mgr_mod.ALL_VARS:
+        assert live_cache.variable_cache_path(live_cfg, name).exists()
+    assert all(v["source"] == REAL for v in mgr.status_snapshot().values())
+
+    removed = mgr.clear_cache()
+    assert set(removed) == set(mgr_mod.ALL_VARS)
+
+    snap = mgr.status_snapshot()
+    assert set(snap) == set(mgr_mod.ALL_VARS)
+    assert all(v["source"] == SYNTHETIC_FALLBACK for v in snap.values())
+
+    # the app must stay usable straight away - get_dataset() still returns
+    # real (if synthetic-fallback) data, never an empty dataset
+    ds = mgr.get_dataset()
+    assert ds.sizes.get("time", 0) > 0
+
+
+def test_live_refresh_endpoint_triggers_background_refetch(live_cfg, monkeypatch):
+    import backend.main as backend_main
+    from fastapi.testclient import TestClient
+    from src.data.live import manager as mgr_mod, providers
+    from src.data.live.manager import get_manager
+
+    monkeypatch.setattr(backend_main, "get_config", lambda: live_cfg)
+    fake = _fake_fetch_factory(live_cfg)
+    calls = {"n": 0}
+
+    def counting_fake(cfg_, name):
+        calls["n"] += 1
+        return fake(cfg_, name)
+
+    monkeypatch.setattr(providers, "fetch_ocean_variable", counting_fake)
+    monkeypatch.setattr(providers, "fetch_wind_variable", counting_fake)
+    # the app's own background-refresh-on-startup thread would otherwise
+    # race the manual /api/live/refresh call below for the _refreshing flag
+    # (both would be legitimately "a refresh in progress" - this test cares
+    # about the manual trigger specifically, so it's the only one running)
+    monkeypatch.setattr(mgr_mod.LiveDataManager, "start_background_refresh", lambda self: None)
+
+    get_manager(live_cfg).refresh_all()
+    first_call_count = calls["n"]
+
+    with TestClient(backend_main.app) as client:
+        r = client.post("/api/live/refresh")
+        assert r.status_code == 200
+        assert r.json()["started"] is True
+
+        mgr = get_manager(live_cfg)
+        for _ in range(100):
+            if not mgr.is_refreshing():
+                break
+            time.sleep(0.05)
+        assert not mgr.is_refreshing()
+        assert calls["n"] > first_call_count, "manual refresh must bypass the freshness-skip and re-fetch"
+
+
+def test_live_refresh_endpoint_400_outside_live_mode(test_env, monkeypatch):
+    import backend.main as backend_main
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(backend_main, "get_config", lambda: test_env)
+    with TestClient(backend_main.app) as client:
+        r = client.post("/api/live/refresh")
+        assert r.status_code == 400
+
+
+def test_live_clear_cache_endpoint(live_cfg, monkeypatch):
+    import backend.main as backend_main
+    from fastapi.testclient import TestClient
+    from src.data.live import providers
+    from src.data.live.manager import get_manager
+
+    monkeypatch.setattr(backend_main, "get_config", lambda: live_cfg)
+    fake = _fake_fetch_factory(live_cfg)
+    monkeypatch.setattr(providers, "fetch_ocean_variable", fake)
+    monkeypatch.setattr(providers, "fetch_wind_variable", fake)
+    get_manager(live_cfg).refresh_all()
+
+    with TestClient(backend_main.app) as client:
+        r = client.post("/api/live/clear_cache")
+        assert r.status_code == 200
+        assert set(r.json()["cleared"]) == {"sst", "sss", "sla", "cur_u", "cur_v", "wind_u", "wind_v"}
+
+
+def test_live_clear_cache_endpoint_400_outside_live_mode(test_env, monkeypatch):
+    import backend.main as backend_main
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(backend_main, "get_config", lambda: test_env)
+    with TestClient(backend_main.app) as client:
+        r = client.post("/api/live/clear_cache")
+        assert r.status_code == 400

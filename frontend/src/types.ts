@@ -177,6 +177,7 @@ export interface LiveStatusResponse {
   live_mode_active: boolean;
   refresh_interval_minutes: number | null;
   max_age_hours: number | null;
+  refreshing: boolean;
   variables: Record<string, LiveVariableStatus>;
 }
 
@@ -185,6 +186,15 @@ export interface LiveLatestResponse {
   latest_common_date: string | null;
   note: string;
   variables: Record<string, LiveVariableStatus>;
+}
+
+export interface LiveRefreshResponse {
+  started: boolean;
+  message: string;
+}
+
+export interface LiveClearCacheResponse {
+  cleared: string[];
 }
 
 /** What the shared Leaflet canvas renders. */

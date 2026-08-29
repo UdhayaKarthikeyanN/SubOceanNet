@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { api, ApiError } from "../api/client";
 import { useApp } from "../state/AppContext";
 import { Badge } from "./ui";
 import type { LiveSource, LiveVariableStatus } from "../types";
@@ -59,8 +60,9 @@ function VariableRow({ name, s }: { name: string; s: LiveVariableStatus }) {
  * mode (data_source.type != "live"), so it never touches synthetic/netcdf
  * mode's existing UI. */
 export default function LiveStatusBadge() {
-  const { liveStatus } = useApp();
+  const { liveStatus, refreshLiveStatus, pushToast } = useApp();
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<"refresh" | "clear" | null>(null);
 
   if (!liveStatus || !liveStatus.live_mode_active) return null;
 
@@ -69,6 +71,49 @@ export default function LiveStatusBadge() {
     return RANK[s.source] > RANK[acc] ? s.source : acc;
   }, "REAL");
   const refreshMin = liveStatus.refresh_interval_minutes;
+  const refreshing = busy === "refresh" || liveStatus.refreshing;
+
+  const handleRefresh = async () => {
+    if (busy) return;
+    setBusy("refresh");
+    try {
+      const res = await api.refreshLiveData();
+      pushToast({
+        kind: "info",
+        message: res.started
+          ? "Recaching live data now - this can take a few minutes for ocean variables"
+          : "A refresh is already in progress",
+      });
+      // poll until the manager reports done (or give up after ~6 minutes)
+      for (let i = 0; i < 90; i++) {
+        await new Promise((r) => setTimeout(r, 4000));
+        const status = await refreshLiveStatus();
+        if (status && !status.refreshing) break;
+      }
+      pushToast({ kind: "success", message: "Live data recached" });
+    } catch (e) {
+      pushToast({ kind: "error", message: e instanceof ApiError ? e.message : "Recache failed" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleClear = async () => {
+    if (busy) return;
+    setBusy("clear");
+    try {
+      const res = await api.clearLiveCache();
+      await refreshLiveStatus();
+      pushToast({
+        kind: "success",
+        message: `Cleared cached live data for ${res.cleared.length} variable(s) - falling back to synthetic until the next fetch lands`,
+      });
+    } catch (e) {
+      pushToast({ kind: "error", message: e instanceof ApiError ? e.message : "Clear cache failed" });
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <div className="relative">
@@ -78,9 +123,10 @@ export default function LiveStatusBadge() {
         title="Live-data source status - click for detail"
       >
         <span className={`h-1.5 w-1.5 rounded-full ${
-          worst === "REAL" ? "bg-emerald-400" : worst === "CACHED REAL" ? "bg-amber-400" : "bg-red-400"
+          refreshing ? "animate-pulse bg-sky-400"
+            : worst === "REAL" ? "bg-emerald-400" : worst === "CACHED REAL" ? "bg-amber-400" : "bg-red-400"
         }`} />
-        LIVE DATA · {worst}
+        LIVE DATA · {refreshing ? "RECACHING…" : worst}
       </button>
       {open && (
         <div className="absolute right-0 top-full z-[700] mt-1.5 w-[360px] rounded-lg border border-[#1c2b45] bg-[#0a1120] p-3 shadow-xl">
@@ -100,6 +146,24 @@ export default function LiveStatusBadge() {
             (stale past {liveStatus.max_age_hours ?? "?"}h) · SYNTHETIC FALLBACK = no
             live data available yet for that variable.
           </p>
+          <div className="mt-3 flex gap-2 border-t border-[#1c2b45] pt-2.5">
+            <button
+              onClick={handleRefresh}
+              disabled={busy !== null || liveStatus.refreshing}
+              title="Force a fresh fetch from Copernicus Marine / ERA5 now, bypassing the refresh interval"
+              className="flex-1 rounded-md border border-[#24365a] bg-[#101b30] px-2 py-1.5 text-[10px] font-medium text-[#b9c7e2] transition hover:border-[#33497a] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {refreshing ? "Recaching…" : "Recache now"}
+            </button>
+            <button
+              onClick={handleClear}
+              disabled={busy !== null}
+              title="Delete all cached live data now (falls back to synthetic until the next fetch lands)"
+              className="flex-1 rounded-md border border-[#4a2438] bg-[#1c0f18] px-2 py-1.5 text-[10px] font-medium text-[#e2a8c0] transition hover:border-[#6a3350] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy === "clear" ? "Clearing…" : "Clear cache"}
+            </button>
+          </div>
         </div>
       )}
     </div>

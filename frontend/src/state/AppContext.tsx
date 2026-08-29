@@ -36,6 +36,7 @@ interface AppState {
   meta: MetaResponse | null;
   modelInfo: ModelInfo | null;
   liveStatus: LiveStatusResponse | null;
+  refreshLiveStatus: () => Promise<LiveStatusResponse | null>;
   date: string;
   setDate: (d: string) => void;
   region: SelectedRegion | null;
@@ -160,6 +161,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // live-data status polling - only active once /api/meta confirms live mode
+  const refreshLiveStatus = useCallback(async () => {
+    try {
+      const status = await api.getLiveStatus();
+      setLiveStatus(status);
+      return status;
+    } catch {
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     if (meta?.data_source !== "live") {
       setLiveStatus(null);
@@ -192,7 +203,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<AppState>(
     () => ({
-      meta, modelInfo, liveStatus, date, setDate,
+      meta, modelInfo, liveStatus, refreshLiveStatus, date, setDate,
       region, setRegion, tab, setTab, stage, setStage,
       mapLayer, setMapLayer, prediction, setPrediction,
       depthIdx, setDepthIdx, playingDepth, setPlayingDepth,
@@ -203,7 +214,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toasts, pushToast, dismissToast,
     }),
     [
-      meta, modelInfo, liveStatus, date, region, setRegion, tab, stage, mapLayer, prediction,
+      meta, modelInfo, liveStatus, refreshLiveStatus, date, region, setRegion, tab, stage, mapLayer, prediction,
       depthIdx, playingDepth, showUncertainty, profilePoints, addProfilePoint,
       clearProfilePoints, clickMode, hoverReadout, toasts, pushToast, dismissToast,
     ]
