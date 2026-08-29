@@ -38,11 +38,16 @@ body {
 
 /* Leaflet dark tweaks */
 .leaflet-container {
-  background: #08101f !important;
+  background: radial-gradient(ellipse at 50% 40%, #0a1526 0%, #060b16 100%) !important;
   font-family: inherit;
 }
 .leaflet-control-attribution {
-  display: none;
+  background: rgba(10, 16, 31, 0.75) !important;
+  color: #5f7096 !important;
+  font-size: 9px;
+}
+.leaflet-control-attribution a {
+  color: #7d8db0 !important;
 }
 .leaflet-bar,
 .leaflet-draw-toolbar a {
@@ -50,10 +55,23 @@ body {
   color: #cbd5ea !important;
   border-color: #1c2b45 !important;
 }
-.leaflet-draw-tooltip {
+.leaflet-bar a:hover,
+.leaflet-draw-toolbar a:hover {
+  background-color: #17253f !important;
+  color: #67e8f9 !important;
+}
+.leaflet-draw-tooltip,
+.leaflet-tooltip {
   background: #101b30;
-  border: 1px solid #1c2b45;
+  border: 1px solid #24365a;
   color: #dbe4f3;
+  box-shadow: 0 4px 16px -4px rgba(0, 0, 0, 0.5);
+}
+.leaflet-tooltip-top:before,
+.leaflet-tooltip-bottom:before,
+.leaflet-tooltip-left:before,
+.leaflet-tooltip-right:before {
+  border-top-color: #24365a;
 }
 .oe-raster {
   pointer-events: none;

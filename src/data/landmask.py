@@ -62,9 +62,23 @@ LAND_POLYGONS: list[list[tuple[float, float]]] = [
     [
         (53.7, 12.3), (54.3, 12.5), (54.4, 12.1), (53.9, 11.9), (53.7, 12.3),
     ],
+    # Lakshadweep (small footprint around the real atoll cluster - these are
+    # scattered islets, not a solid landmass, so kept deliberately tight
+    # rather than a full bounding box that would over-mask open ocean).
+    # Margin comfortably covers the 0.25deg grid-snapped cell of each islet.
+    [
+        (72.55, 12.15), (73.25, 12.15), (73.25, 10.3), (72.55, 10.3), (72.55, 12.15),
+    ],
+    # Maldives (northern tip only - the rest of the atoll chain is south of
+    # this app's 5N domain edge)
+    [
+        (72.8, 7.5), (73.55, 7.5), (73.55, 6.05), (72.8, 6.05), (72.8, 7.5),
+    ],
 ]
 
 # Small island chains rendered as dots on the basemap (too small to mask).
+# Tuples are (lon, lat, name) - matches LAND_POLYGONS' (lon, lat) vertex
+# order. backend/main.py unpacks accordingly before relabeling to {lat, lon}.
 ISLAND_POINTS: list[tuple[float, float, str]] = [
     (72.9, 11.9, "Lakshadweep"), (73.2, 11.2, ""), (72.6, 10.5, ""),
     (73.1, 6.9, "Maldives"), (73.4, 6.3, ""), (73.0, 7.3, ""),

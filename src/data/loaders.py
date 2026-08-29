@@ -9,6 +9,7 @@ import numpy as np
 import xarray as xr
 
 from ..config import get_config, input_variable_names
+from .netcdf_lock import NETCDF_IO_LOCK
 
 
 def synthetic_dir(cfg=None) -> Path:
@@ -50,7 +51,12 @@ def load_input_dataset(cfg=None) -> xr.Dataset:
             raise FileNotFoundError(
                 f"Synthetic dataset not found at {path}. Run: python -m src.data.generate_synthetic"
             )
-        ds = xr.open_dataset(path, engine="netcdf4")
+        # .load() while still holding the lock: this dataset gets cached by
+        # Predictor and read by every future request for the process's
+        # lifetime, so a lazy handle would keep letting concurrent requests
+        # trigger unsynchronized HDF5 reads long after this one-time open.
+        with NETCDF_IO_LOCK:
+            ds = xr.open_dataset(path, engine="netcdf4").load()
         missing = [n for n in names if n not in ds]
         if missing:
             raise ValueError(f"Synthetic inputs.nc missing variables: {missing}")
@@ -79,17 +85,20 @@ def load_input_dataset(cfg=None) -> xr.Dataset:
         raise FileNotFoundError(f"data_source=netcdf but input dir not found: {raw}")
     tcoord = src["netcdf"].get("time_coord", "time")
     datasets = []
-    for name in names:
-        p = raw / f"{name}.nc"
-        if not p.exists():
-            raise FileNotFoundError(f"Missing required input file {p}")
-        dsi = xr.open_dataset(p, engine="netcdf4")
-        var_candidates = [v for v in dsi.data_vars if v.lower().replace("_", "") == name]
-        if not var_candidates:
-            var_candidates = list(dsi.data_vars)[:1]
-        da = dsi[var_candidates[0]]
-        da.name = name
-        datasets.append(da.to_dataset())
+    # loaded (not lazy) for the same reason as the synthetic branch above -
+    # this gets cached and read by every future concurrent request
+    with NETCDF_IO_LOCK:
+        for name in names:
+            p = raw / f"{name}.nc"
+            if not p.exists():
+                raise FileNotFoundError(f"Missing required input file {p}")
+            dsi = xr.open_dataset(p, engine="netcdf4")
+            var_candidates = [v for v in dsi.data_vars if v.lower().replace("_", "") == name]
+            if not var_candidates:
+                var_candidates = list(dsi.data_vars)[:1]
+            da = dsi[var_candidates[0]].load()
+            da.name = name
+            datasets.append(da.to_dataset())
     merged = xr.merge(datasets, join="inner")
     return _standardize(merged, tcoord, src["netcdf"].get("depth_coord", "depth"))[names]
 
@@ -109,7 +118,16 @@ def load_reference_dataset(cfg=None) -> tuple[xr.Dataset, str]:
     if ref_dir.exists():
         files = sorted(ref_dir.glob("*.nc"))
         if files:
-            ds = xr.open_mfdataset(files, combine="by_coords")
+            # Deliberately left lazy (no .load()): this can be a large
+            # multi-file GLORYS/ARGO reference, called fresh on every
+            # request, and callers only ever touch a handful of points/
+            # slices from it - eagerly loading the whole thing every call
+            # would be a major regression. Callers must do their own
+            # .values/.sel() reads inside NETCDF_IO_LOCK instead (see
+            # backend/main.py) since that's where the actual lazy read
+            # happens.
+            with NETCDF_IO_LOCK:
+                ds = xr.open_mfdataset(files, combine="by_coords")
             ds = _standardize(ds, ref_cfg.get("time_coord", "time"),
                               ref_cfg.get("depth_coord", "depth"))
             if "temperature" not in ds:
@@ -122,7 +140,9 @@ def load_reference_dataset(cfg=None) -> tuple[xr.Dataset, str]:
         raise FileNotFoundError(
             f"No reference data: neither {ref_dir} nor synthetic truth at {path}"
         )
-    ds = xr.open_dataset(path, engine="netcdf4")
+    # Also deliberately lazy - see the glorys_argo branch above for why.
+    with NETCDF_IO_LOCK:
+        ds = xr.open_dataset(path, engine="netcdf4")
     ds = _standardize(ds, "time", "depth")
     return ds[["temperature"]], "SYNTHETIC REFERENCE - DEMO MODE"
 

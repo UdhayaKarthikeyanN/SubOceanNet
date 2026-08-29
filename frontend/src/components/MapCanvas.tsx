@@ -5,6 +5,12 @@ import { useApp } from "../state/AppContext";
 import { paletteFor } from "../utils/colormap";
 import type { RasterLayer } from "../types";
 
+const PRESET_DOTS: Record<string, string> = {
+  arabian_sea: "#22d3ee",
+  bay_of_bengal: "#a78bfa",
+  equatorial_io: "#34d399",
+};
+
 function rasterToURL(layer: RasterLayer): string {
   const h = layer.lats.length;
   const w = layer.lons.length;
@@ -21,6 +27,8 @@ function rasterToURL(layer: RasterLayer): string {
       const v = layer.values[srcY]?.[x];
       const o = (y * w + x) * 4;
       if (v === null || v === undefined || !isFinite(v)) {
+        // no-data (land or a gap in the source product) - fully transparent
+        // so the real basemap tiles underneath show through directly
         img.data[o + 3] = 0;
         continue;
       }
@@ -67,10 +75,25 @@ export default function MapPanel() {
       zoom: 5,
       minZoom: 4,
       zoomControl: true,
-      attributionControl: false,
+      attributionControl: true,
       maxBoundsViscosity: 0.9,
     });
     mapRef.current = map;
+
+    // real basemap tiles - accurate coastlines instead of the hand-drawn
+    // approximation. Requires internet access at runtime (see README "Map
+    // tiles" note); the app's data pipeline itself still works fully
+    // offline in synthetic/netcdf mode. Esri's dark gray canvas basemap -
+    // no API key required (unlike CARTO's current tile service, which
+    // started demanding one). Note the {z}/{y}/{x} order: ArcGIS REST tile
+    // endpoints put row before column, the reverse of the usual {x}/{y}.
+    L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+      {
+        attribution: "Esri, HERE, Garmin, FAO, NOAA, USGS",
+        maxZoom: 16,
+      }
+    ).addTo(map);
 
     const drawn = new L.FeatureGroup().addTo(map);
     drawnRef.current = drawn;
@@ -126,7 +149,12 @@ export default function MapPanel() {
     };
   }, [setRegion]);
 
-  // ---- static basemap: graticule + coastlines + islands ----
+  // ---- static overlay: graticule ----
+  // Coastlines come from the real basemap tile layer (see map init above)
+  // instead of the old hand-drawn LAND_POLYGONS, so the data raster lines
+  // up with the actual coast. The backend still exposes
+  // land_polygons/islands (unused here) since the synthetic generator's
+  // land mask is derived from the same polygons.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !meta) return;
@@ -136,22 +164,16 @@ export default function MapPanel() {
     const b = meta.bounds;
 
     for (let la = Math.ceil(b.lat_min / 5) * 5; la <= b.lat_max; la += 5) {
-      L.polyline([[la, b.lon_min], [la, b.lon_max]], { color: "#1b2947", weight: 1, interactive: false }).addTo(group);
+      L.polyline([[la, b.lon_min], [la, b.lon_max]], {
+        color: "#67e8f9", weight: 1, opacity: 0.18, dashArray: "1 5", interactive: false,
+      }).addTo(group);
     }
     for (let lo = Math.ceil(b.lon_min / 5) * 5; lo <= b.lon_max; lo += 5) {
-      L.polyline([[b.lat_min, lo], [b.lat_max, lo]], { color: "#1b2947", weight: 1, interactive: false }).addTo(group);
+      L.polyline([[b.lat_min, lo], [b.lat_max, lo]], {
+        color: "#67e8f9", weight: 1, opacity: 0.18, dashArray: "1 5", interactive: false,
+      }).addTo(group);
     }
-    L.geoJSON(meta.land_polygons as never, {
-      style: { color: "#33497a", weight: 1.4, fillColor: "#16223c", fillOpacity: 0.85 },
-      interactive: false,
-    }).addTo(group);
-    meta.islands.forEach((isl) => {
-      L.circleMarker([isl.lat, isl.lon], {
-        radius: 1.6, color: "#8fa2c7", fillOpacity: 0.9, weight: 1, interactive: false,
-      })
-        .bindTooltip(isl.name || "", { permanent: false, direction: "top" })
-        .addTo(group);
-    });
+
     map.fitBounds([
       [b.lat_min, b.lon_min],
       [b.lat_max, b.lon_max],
@@ -284,34 +306,40 @@ export default function MapPanel() {
   return (
     <div className="flex h-full flex-col gap-2">
       {/* preset toolbar */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="mr-1 text-[10px] uppercase tracking-widest text-[#5f7096]">Regions</span>
+      <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-[#1c2b45] bg-[#0d1526]/80 px-2.5 py-2">
+        <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#5f7096]">Regions</span>
         {presets.map((p) => (
           <button
             key={p.id}
             onClick={() => applyPreset(p.id)}
-            className={`rounded-md border px-2 py-1 text-[11px] transition ${
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition ${
               sel?.presetId === p.id
-                ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-200"
-                : "border-[#24365a] bg-[#101b30] text-[#8fa2c7] hover:border-[#33497a]"
+                ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-200 shadow-[0_0_12px_-4px_rgba(34,211,238,0.5)]"
+                : "border-[#24365a] bg-[#101b30] text-[#8fa2c7] hover:border-[#33497a] hover:bg-[#141f38]"
             }`}
           >
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ background: PRESET_DOTS[p.id] ?? "#5f7096" }}
+            />
             {p.name}
           </button>
         ))}
-        <button
-          onClick={() => applyPreset(undefined)}
-          className="rounded-md border border-[#24365a] bg-transparent px-2 py-1 text-[11px] text-[#66779b] hover:text-red-300"
-        >
-          Clear
-        </button>
-        <span className="ml-auto hidden text-[10px] text-[#66779b] md:inline">
-          Draw a rectangle or polygon on the map to select a custom region
+        {sel && (
+          <button
+            onClick={() => applyPreset(undefined)}
+            className="inline-flex items-center gap-1 rounded-md border border-[#24365a] bg-transparent px-2 py-1 text-[11px] text-[#66779b] transition hover:border-red-500/40 hover:text-red-300"
+          >
+            <span aria-hidden>×</span> Clear
+          </button>
+        )}
+        <span className="ml-auto hidden text-[10px] text-[#4d5f82] lg:inline">
+          or draw a rectangle / polygon on the map →
         </span>
       </div>
 
       {/* map */}
-      <div className="relative flex-1 overflow-hidden rounded-xl border border-[#1c2b45]" style={{ minHeight: 260 }}>
+      <div className="relative flex-1 overflow-hidden rounded-xl border border-[#1c2b45] shadow-[inset_0_0_40px_-20px_rgba(0,0,0,0.8)]" style={{ minHeight: 260 }}>
         <div ref={divRef} className="absolute inset-0 z-0" />
         {mapLayer && (
           <div className="pointer-events-none absolute bottom-3 left-3 z-[500]">
@@ -337,18 +365,23 @@ export default function MapPanel() {
       </div>
 
       {/* selection stats */}
-      <div className="rounded-xl border border-[#1c2b45] bg-[#0d1526]/80 px-3 py-2 font-mono text-[11px] text-[#8fa2c7]">
+      <div className="rounded-xl border border-[#1c2b45] bg-[#0d1526]/80 px-3 py-2">
         {sel ? (
-          <>
-            <span className="text-cyan-300">SELECTED</span>{"  "}
-            {sel.presetId ? `preset:${sel.presetId}` : "custom-polygon"}{"  "}
-            {sel.bbox.latMin.toFixed(2)}–{sel.bbox.latMax.toFixed(2)}°N,{" "}
-            {sel.bbox.lonMin.toFixed(2)}–{sel.bbox.lonMax.toFixed(2)}°E{"  "}
-            <span className="text-[#5f7096]">| ~{selCells} grid cells @ {res}°</span>
-          </>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px]">
+            <span className="inline-flex items-center gap-1.5 text-cyan-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" /> SELECTED
+            </span>
+            <span className="text-[#9fb0d0]">
+              {sel.presetId ? presets.find((p) => p.id === sel.presetId)?.name ?? sel.presetId : "custom polygon"}
+            </span>
+            <span className="text-[#8fa2c7]">
+              {sel.bbox.latMin.toFixed(2)}–{sel.bbox.latMax.toFixed(2)}°N, {sel.bbox.lonMin.toFixed(2)}–{sel.bbox.lonMax.toFixed(2)}°E
+            </span>
+            <span className="ml-auto text-[#5f7096]">~{selCells?.toLocaleString()} cells @ {res}°</span>
+          </div>
         ) : (
-          <span className="text-[#66779b]">
-            No selection yet - use the drawing tools (⬒ rectangle / ⬠ polygon, top-right of map)
+          <span className="text-[11px] text-[#66779b]">
+            No selection yet — use the drawing tools (⬒ rectangle / ⬠ polygon, top-right of map)
             or pick a preset above.
           </span>
         )}
@@ -369,7 +402,7 @@ export default function MapPanel() {
       )}
       {region && region.cells > 0 && region.cells > 10000 && (
         <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-1.5 text-[11px] text-red-200">
-          Selection is very large (~{selCells} cells); predictions are capped - choose a smaller area.
+          Selection is very large (~{selCells?.toLocaleString()} cells); predictions are capped - choose a smaller area.
         </div>
       )}
     </div>

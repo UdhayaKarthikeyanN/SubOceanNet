@@ -16,7 +16,11 @@ winds U,V                                              (ONLY temperature is outp
 
 * **Domain:** 5°N–30°N, 45°E–105°E · daily · 0.25° × 0.25° grid (101 × 241)
 * **Depths:** 0, 5, 10, 20, 30, 50, 75, 100, 125, 150, 200, 300, 500, 700, 1000 m
-* Runs fully offline on localhost — no cloud services.
+* The model, data pipeline, and API run fully offline on localhost - no
+  cloud services required for prediction. The map's basemap tiles are the
+  one exception: the frontend loads real coastline tiles from Esri (see
+  "Map tiles" below), so a browser with internet access is needed to see
+  the map itself.
 
 ---
 
@@ -216,7 +220,7 @@ suboceannet/
 │   └── validation/metrics.py      # RMSE/MAE/Bias/r/R² per depth + bands + cache
 ├── frontend/src/
 │   ├── components/  MapCanvas (Leaflet draw+raster), PipelineBanner, DepthSlider…
-│   ├── views/       Inputs, Prediction, Volume3D (Plotly), Profiles, TimeSeries, Validation
+│   ├── views/       Inputs, Prediction, Volume3D (placeholder - awaiting spec), Profiles, TimeSeries, Validation
 │   ├── api/client.ts                # typed REST client + job polling
 │   └── state/AppContext.tsx         # shared date/region/prediction state
 ├── bin/                         # start.cmd / stop.cmd (+ .sh) - daily drivers
@@ -304,7 +308,7 @@ Tests:
 4. **Prediction Maps tab** — *Run prediction*. Progress shows preprocessing →
    embedding → decoding stages. Use the **depth slider / animate sweep**, toggle
    **Temperature ↔ Uncertainty ±σ**. Banner highlights embedding → prediction.
-5. **3D Volume** — rotatable depth-stacked slices (or experimental isosurface).
+5. **3D Volume** — placeholder, being rebuilt (previous Plotly/PyVista prototypes were removed).
 6. **Vertical Profiles** — enable picking, drop up to 5 points on the map;
    dashed lines = reference truth; whiskers = ±2σ MC-dropout.
 7. **Time Series** — point or polygon-mean temperature through time per depth.
@@ -342,6 +346,24 @@ authentication and a job queue that survives multiple worker processes
 (`JOBS` in `backend/main.py` is an in-memory dict — fine for one process,
 not for `--workers N`). Add both before exposing this to the public internet.
 
+## Map tiles
+
+The region map (`frontend/src/components/MapCanvas.tsx`) uses real basemap
+tiles (Esri's "World Dark Gray Base" canvas) so the coastline lines up
+exactly with wherever the actual land is - no API key needed, but the
+browser needs internet access to fetch tiles from `server.arcgisonline.com`.
+This is the only part of the app that isn't fully offline; the model, data
+pipeline, and every `/api/*` endpoint still work without internet.
+
+(An earlier version of this used CARTO's `basemaps.cartocdn.com` tiles,
+which are free but now require an API key for continued anonymous access -
+Esri's canvas basemap doesn't.)
+
+The old hand-drawn coastline approximation (`src/data/landmask.py`'s
+`LAND_POLYGONS`/`ISLAND_POINTS`) still exists and is still used to mask
+land cells when generating synthetic demo data - it's just no longer drawn
+on the map, since the real tiles are strictly more accurate for that.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -357,5 +379,5 @@ not for `--workers N`). Add both before exposing this to the public internet.
 
 ## Non-goals
 
-Operational forecasting, non-NIO regions, sub-0.25° super-resolution, real-time
-satellite ingestion, GPU requirement, authentication.
+Operational forecasting, non-NIO regions, sub-0.25° super-resolution,
+GPU requirement, authentication.

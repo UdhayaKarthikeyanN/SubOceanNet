@@ -30,6 +30,9 @@ export default function Legend({
         <span className="text-[#66779b]">{units}</span>
         <span>{max.toFixed(2)}</span>
       </div>
+      <div className="mt-1.5 border-t border-[#16223c] pt-1.5 text-[9px] text-[#5f7096]">
+        transparent = land / no data (real basemap shows through)
+      </div>
     </div>
   );
 }

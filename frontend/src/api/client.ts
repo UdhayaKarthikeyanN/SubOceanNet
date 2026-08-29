@@ -106,11 +106,6 @@ export const api = {
       })}`
     ),
 
-  getIsosurface: (p: { region: unknown; date: string }) =>
-    j<{ html: string; date: string; lats: number[]; lons: number[]; depths: number[] }>(
-      `/api/isosurface${qs({ region: JSON.stringify(p.region), date: p.date })}`
-    ),
-
   getLiveStatus: () => j<LiveStatusResponse>("/api/live/status"),
 
   getLiveLatest: () => j<LiveLatestResponse>("/api/live/latest"),

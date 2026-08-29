@@ -26,6 +26,11 @@ from ..config import depths as cfg_depths, get_config, input_variable_names
 from .landmask import points_in_polygon
 from .loaders import load_input_dataset, nearest_date_index
 
+# Ocean-physics variables (as opposed to wind_u/wind_v, an atmospheric
+# reanalysis with valid data over land too) - used to decide the output
+# land/ocean mask. See preprocess_for_inference().
+OCEAN_DOMAIN_VARS = {"sst", "sss", "sla", "cur_u", "cur_v"}
+
 
 # ---------------------------------------------------------------------------
 # Region geometry
@@ -329,6 +334,7 @@ def preprocess_for_inference(cfg: dict, date_str: str, region: Region,
 
     qc = {"variables": {}, "date_requested": date_str, "date_resolved": resolved}
     chans = []
+    ocean_land_flags = []  # land_local from OCEAN-domain variables only (see below)
     for name in order:
         da = crop[name].isel(time=tidx) if "time" in crop[name].dims else crop[name]
         arr = np.asarray(da.values, dtype=np.float32)
@@ -343,9 +349,11 @@ def preprocess_for_inference(cfg: dict, date_str: str, region: Region,
             arr = np.where((arr < spec["valid_min"]) | (arr > spec["valid_max"]),
                            np.nan, arr)
             rep = {}
-        # land = permanently-missing cells
+        # land = permanently-missing cells (per this variable's own domain)
         land_local = ~_ocean_from_domain(ds, name, lats, lons, tidx)
         arr, n_filled = fill_missing_spatial(arr, lats, lons, land_local)
+        if name in OCEAN_DOMAIN_VARS:
+            ocean_land_flags.append(land_local)
         qc["variables"][name] = {
             "missing_before": n_bad_before,
             "filled_or_interpolated": n_filled,
@@ -355,6 +363,14 @@ def preprocess_for_inference(cfg: dict, date_str: str, region: Region,
         chans.append(normalize(arr, sc))
 
     tensor = np.stack(chans, axis=0)  # (7,H,W)
+    # Output land/ocean mask must come from OCEAN variables (sst/sss/sla/
+    # currents), never wind: ERA5 winds are an atmospheric reanalysis with
+    # valid data over land too, so in live mode wind's own "land" flag is
+    # ~always False - using it (e.g. by taking whichever variable happened
+    # to be last in the loop) would predict "ocean" temperatures over land.
+    # A cell counts as land here if ANY ocean-domain variable lacks data
+    # there (conservative: never show a prediction we can't stand behind).
+    land_local = np.logical_or.reduce(ocean_land_flags) if ocean_land_flags else land_local
     ocean_mask = ~land_local
     return {
         "tensor": tensor.astype(np.float32),

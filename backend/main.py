@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from src.config import bundle_dir, depths as cfg_depths, get_config, input_variable_names
 from src.data import loaders as data_loaders
 from src.data.landmask import ISLAND_POINTS, coastlines_geojson
+from src.data.netcdf_lock import NETCDF_IO_LOCK
 from src.data.preprocessing import Region, parse_region, region_cell_mask
 from src.inference import Predictor, json_safe
 
@@ -235,7 +236,7 @@ def meta():
         "data_source": cfg["data_source"]["type"],
         "demo_mode": cfg["data_source"]["type"] == "synthetic",
         "land_polygons": coastlines_geojson(),
-        "islands": [{"lat": la, "lon": lo, "name": nm} for la, lo, nm in ISLAND_POINTS],
+        "islands": [{"lat": la, "lon": lo, "name": nm} for lo, la, nm in ISLAND_POINTS],
         "model_status": TRAIN_STATE["status"],
     }
 
@@ -445,10 +446,11 @@ def profile(lat: float, lon: float, date: str | None = Query(None)):
     ref_out, ref_label = None, None
     try:
         ref_ds, ref_label = data_loaders.load_reference_dataset(cfg)
-        tidx = data_loaders.nearest_date_index(ref_ds, res["date"])
-        da = ref_ds["temperature"].isel(time=tidx).sel(
-            lat=float(pt["snapped_lat"]), lon=float(pt["snapped_lon"]), method="nearest")
-        ref_vals = np.asarray(da.values, dtype=np.float64)
+        with NETCDF_IO_LOCK:  # ref_ds is lazy - this is where the actual read happens
+            tidx = data_loaders.nearest_date_index(ref_ds, res["date"])
+            da = ref_ds["temperature"].isel(time=tidx).sel(
+                lat=float(pt["snapped_lat"]), lon=float(pt["snapped_lon"]), method="nearest")
+            ref_vals = np.asarray(da.values, dtype=np.float64)
         ref_out = [None if not np.isfinite(v) else round(float(v), 3) for v in ref_vals]
     except FileNotFoundError as e:
         ref_label = None
@@ -513,19 +515,20 @@ def timeseries(lat: float = Query(None), lon: float = Query(None),
     ref_series, ref_label = None, None
     try:
         ref_ds, ref_label = data_loaders.load_reference_dataset(cfg)
-        times = ref_ds["time"].values.astype("datetime64[D]")
         refs = []
-        for ds_ in ts["dates"]:
-            target = np.datetime64(ds_, "D")
-            tidx = int(np.argmin(np.abs(times - target)))
-            da = ref_ds["temperature"].isel(time=tidx).isel(depth=k)
-            if reg is not None:
-                da = da.sel(lat=slice(reg.lat_min, reg.lat_max),
-                            lon=slice(reg.lon_min, reg.lon_max))
-                v = float(np.nanmean(np.asarray(da.values, dtype=np.float64)))
-            else:
-                v = float(da.sel(lat=lat, lon=lon, method="nearest").values)
-            refs.append(round(v, 3))
+        with NETCDF_IO_LOCK:  # ref_ds is lazy - this is where the actual reads happen
+            times = ref_ds["time"].values.astype("datetime64[D]")
+            for ds_ in ts["dates"]:
+                target = np.datetime64(ds_, "D")
+                tidx = int(np.argmin(np.abs(times - target)))
+                da = ref_ds["temperature"].isel(time=tidx).isel(depth=k)
+                if reg is not None:
+                    da = da.sel(lat=slice(reg.lat_min, reg.lat_max),
+                                lon=slice(reg.lon_min, reg.lon_max))
+                    v = float(np.nanmean(np.asarray(da.values, dtype=np.float64)))
+                else:
+                    v = float(da.sel(lat=lat, lon=lon, method="nearest").values)
+                refs.append(round(v, 3))
         ref_series, ref_label = refs, ref_label
     except Exception:
         ref_series, ref_label = None, None
@@ -572,20 +575,26 @@ def validation(region: str = Query(..., description="GeoJSON Polygon (URL-encode
         dr = dr[np.unique(np.linspace(0, len(dr) - 1, 8).astype(int))]
     preds, refs = [], []
     ref_ds, ref_label = data_loaders.load_reference_dataset(cfg)
-    ref_times = ref_ds["time"].values.astype("datetime64[D]")
+    with NETCDF_IO_LOCK:  # ref_ds is lazy - just the initial coordinate read
+        ref_times = ref_ds["time"].values.astype("datetime64[D]")
     for d in dr:
         ds_ = d.strftime("%Y-%m-%d")
+        # NOT locked: predict_region() does its own model inference (slow,
+        # CPU-bound) plus its own brief internal NETCDF_IO_LOCK use for live
+        # mode (see src/data/live/cache.py) - holding this loop's lock across
+        # it would needlessly serialize inference across concurrent requests.
         res = predictor.predict_region(ds_, reg, mc_passes=1)
         pred_field = np.asarray(res["temperature"], dtype=np.float64)
         target = np.datetime64(res["date"], "D")
-        tidx = int(np.argmin(np.abs(ref_times - target)))
-        ref_crop = ref_ds["temperature"].isel(time=tidx).sel(
-            lat=slice(reg.lat_min, reg.lat_max), lon=slice(reg.lon_min, reg.lon_max))
-        ref_arr = np.asarray(ref_crop.values, dtype=np.float64)
-        if ref_arr.shape != pred_field.shape:
-            ref_da = ref_ds["temperature"].isel(time=tidx).interp(
-                lat=np.asarray(res["lats"]), lon=np.asarray(res["lons"]))
-            ref_arr = np.asarray(ref_da.values, dtype=np.float64)
+        with NETCDF_IO_LOCK:  # ref_ds is lazy - this is where the actual reads happen
+            tidx = int(np.argmin(np.abs(ref_times - target)))
+            ref_crop = ref_ds["temperature"].isel(time=tidx).sel(
+                lat=slice(reg.lat_min, reg.lat_max), lon=slice(reg.lon_min, reg.lon_max))
+            ref_arr = np.asarray(ref_crop.values, dtype=np.float64)
+            if ref_arr.shape != pred_field.shape:
+                ref_da = ref_ds["temperature"].isel(time=tidx).interp(
+                    lat=np.asarray(res["lats"]), lon=np.asarray(res["lons"]))
+                ref_arr = np.asarray(ref_da.values, dtype=np.float64)
         preds.append(pred_field)
         refs.append(ref_arr)
 
@@ -613,45 +622,6 @@ def validation(region: str = Query(..., description="GeoJSON Polygon (URL-encode
     }
     save_cache(cfg["paths"]["cache_dir"], key, json.loads(json.dumps(payload, default=float)))
     return json.loads(json.dumps(payload, default=float))
-
-
-# ---------------------------------------------------------------------------
-# Isosurface rendering via PyVista
-# ---------------------------------------------------------------------------
-
-@app.get("/api/isosurface")
-def isosurface(date: str = Query(..., description="ISO date YYYY-MM-DD"),
-               region: str = Query(..., description="GeoJSON Polygon")):
-    """Render a 3D isosurface using PyVista and return as HTML."""
-    cfg = get_config()
-    predictor = require_model()
-    reg, mask = valid_region(_parse_json_param(region, "region"), cfg)
-    d = valid_date(date, cfg)
-
-    res = predictor.predict_region(d, reg, mc_passes=1)
-
-    # Extract arrays from prediction result
-    lats = res["lats"]
-    lons = res["lons"]
-    depths = res["depths"]
-    temp = res["temperature"]  # (nz, ny, nx)
-    resolved_date = res["date"]
-
-    try:
-        from src.rendering.isosurface import render_isosurface_html
-        html = render_isosurface_html(
-            lats=lats, lons=lons, depths=depths,
-            temperature=temp, date_str=resolved_date)
-        return {
-            "html": html,
-            "date": resolved_date,
-            "lats": lats,
-            "lons": lons,
-            "depths": depths,
-        }
-    except Exception as exc:
-        traceback.print_exc()
-        abort(500, f"isosurface rendering failed: {exc}")
 
 
 # ---------------------------------------------------------------------------

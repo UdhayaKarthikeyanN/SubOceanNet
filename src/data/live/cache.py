@@ -18,6 +18,8 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from ..netcdf_lock import NETCDF_IO_LOCK as _IO_LOCK
+
 
 def cache_dir(cfg: dict) -> Path:
     live = cfg["data_source"].get("live", {})
@@ -64,21 +66,22 @@ def append_timestep(cfg: dict, name: str, da: xr.DataArray, max_timesteps: int =
     if "time" not in da.dims:
         da = da.expand_dims("time")
 
-    if path.exists():
-        with xr.open_dataarray(path) as existing:
-            combined = xr.concat([existing.load(), da], dim="time")
-    else:
-        combined = da
+    with _IO_LOCK:
+        if path.exists():
+            with xr.open_dataarray(path) as existing:
+                combined = xr.concat([existing.load(), da], dim="time")
+        else:
+            combined = da
 
-    _, first_idx = np.unique(combined["time"].values, return_index=True)
-    combined = combined.isel(time=np.sort(first_idx))
-    if combined.sizes["time"] > max_timesteps:
-        combined = combined.isel(time=slice(-max_timesteps, None))
+        _, first_idx = np.unique(combined["time"].values, return_index=True)
+        combined = combined.isel(time=np.sort(first_idx))
+        if combined.sizes["time"] > max_timesteps:
+            combined = combined.isel(time=slice(-max_timesteps, None))
 
-    tmp = path.with_suffix(".tmp.nc")
-    combined.to_dataset(name=name).to_netcdf(tmp)
-    combined.close() if hasattr(combined, "close") else None
-    os.replace(tmp, path)
+        tmp = path.with_suffix(".tmp.nc")
+        combined.to_dataset(name=name).to_netcdf(tmp)
+        combined.close() if hasattr(combined, "close") else None
+        os.replace(tmp, path)
 
 
 def read_variable_cache(cfg: dict, name: str) -> xr.DataArray | None:
@@ -87,5 +90,5 @@ def read_variable_cache(cfg: dict, name: str) -> xr.DataArray | None:
     path = variable_cache_path(cfg, name)
     if not path.exists():
         return None
-    with xr.open_dataarray(path) as da:
+    with _IO_LOCK, xr.open_dataarray(path) as da:
         return da.load()
