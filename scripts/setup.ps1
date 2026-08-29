@@ -1,4 +1,4 @@
-# One-command bootstrap for OceanEmbed (Windows).
+# One-command bootstrap for SubOceanNet (Windows).
 # Usage:  powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 param(
     [switch]$SkipData,
@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-Write-Host "== OceanEmbed setup ==" -ForegroundColor Cyan
+Write-Host "== SubOceanNet setup ==" -ForegroundColor Cyan
 Write-Host "Project root: $Root"
 
 # --- Python venv + backend deps ---
@@ -41,7 +41,7 @@ if (-not $SkipData) {
     }
 }
 if ((-not $SkipTrain) -and (-not $SkipData)) {
-    if (-not (Test-Path "data\checkpoints\oceanembed_demo\checkpoint.pt")) {
+    if (-not (Test-Path "data\checkpoints\suboceannet_demo\checkpoint.pt")) {
         Write-Host "-> training quick demo model (~1 min on CPU)"
         & $py src\train.py --auto
     } else {

@@ -141,7 +141,7 @@ export default function ValidationView() {
                   <CartesianGrid stroke="#16233c" vertical={false} strokeDasharray="3 3" />
                   <XAxis dataKey="depth" tick={{ fill: "#66779b", fontSize: 10 }} stroke="#24365a" label={{ value: "m", position: "insideBottomRight", offset: -4, fill: "#4a5876", fontSize: 10 }} />
                   <YAxis tick={{ fill: "#9fb0d0", fontSize: 10 }} stroke="#24365a" />
-                  <Tooltip contentStyle={{ background: "#0d1526", border: "1px solid #1c2b45", borderRadius: 8 }} formatter={(v) => `${Number(v).toFixed(3)} °C`} />
+                  <Tooltip contentStyle={{ background: "#0d1526", border: "1px solid #1c2b45", borderRadius: 8, color: "#dbe4f3" }} formatter={(v) => `${Number(v).toFixed(3)} °C`} />
                   <Bar dataKey="rmse" radius={[3, 3, 0, 0]}>
                     {metrics.map((m, i) => (
                       <Cell key={i} fill={hexStops("prediction")[i % 10]} />
@@ -177,7 +177,7 @@ export default function ValidationView() {
                   />
                   <YAxis type="number" dataKey="y" name="reference °C" domain={["auto", "auto"]} tick={{ fill: "#9fb0d0", fontSize: 10 }} stroke="#24365a" />
                   <ZAxis range={[14, 14]} />
-                  <Tooltip contentStyle={{ background: "#0d1526", border: "1px solid #1c2b45", borderRadius: 8 }} cursor={{ strokeDasharray: "4 4", stroke: "#24365a" }} />
+                  <Tooltip contentStyle={{ background: "#0d1526", border: "1px solid #1c2b45", borderRadius: 8, color: "#dbe4f3" }} cursor={{ strokeDasharray: "4 4", stroke: "#24365a" }} />
                   <Scatter data={res.scatter.points.map(([x, y]) => ({ x, y }))} fill="#22d3ee" fillOpacity={0.35} />
                   <ReferenceLine
                     segment={[{ x: res.scatter.points[0]?.[1] ?? 0, y: res.scatter.points[0]?.[1] ?? 0 },

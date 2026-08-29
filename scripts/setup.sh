@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command bootstrap for OceanEmbed (Linux/macOS).
+# One-command bootstrap for SubOceanNet (Linux/macOS).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -8,7 +8,7 @@ for a in "$@"; do case "$a" in
   --skip-data) SKIP_DATA=1;; --skip-train) SKIP_TRAIN=1;; --skip-npm) SKIP_NPM=1;; esac
 done
 
-echo "== OceanEmbed setup =="
+echo "== SubOceanNet setup =="
 python3 --version
 [ -d .venv ] || python3 -m venv .venv
 PY=.venv/bin/python
@@ -26,7 +26,7 @@ if [ "$SKIP_DATA" -eq 0 ] && [ ! -f data/synthetic/inputs.nc ]; then
   "$PY" -m src.data.generate_synthetic
 fi
 if [ "$SKIP_TRAIN" -eq 0 ] && [ "$SKIP_DATA" -eq 0 ] \
-   && [ ! -f data/checkpoints/oceanembed_demo/checkpoint.pt ]; then
+   && [ ! -f data/checkpoints/suboceannet_demo/checkpoint.pt ]; then
   echo "-> training demo model"
   "$PY" src/train.py --auto
 fi

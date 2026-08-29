@@ -1,4 +1,4 @@
-# OceanEmbed shutdown: stops backend/frontend recorded in .run\*.pid,
+# SubOceanNet shutdown: stops backend/frontend recorded in .run\*.pid,
 # then sweeps the ports as a fallback - ONLY killing processes that can be
 # identified as ours (uvicorn / vite / npm inside this project tree),
 # so unrelated services on the same ports are never touched.
@@ -24,7 +24,7 @@ function Remove-Ours([int]$ProcId, [string]$Tag) {
         $cmd -like "*$Root*"
     )
     if (-not $isOurs) {
-        Write-Host ("[skip] pid {0} ({1}) does not look like OceanEmbed - not touching it" -f $ProcId, $Tag) -ForegroundColor DarkYellow
+        Write-Host ("[skip] pid {0} ({1}) does not look like SubOceanNet - not touching it" -f $ProcId, $Tag) -ForegroundColor DarkYellow
         return
     }
     # kill the whole tree (npm -> cmd -> node chains)
@@ -49,4 +49,4 @@ foreach ($pair in @(@("backend", $ApiPort), @("frontend", $WebPort))) {
     foreach ($c in $conns) { Remove-Ours ([int]$c.OwningProcess) "$tag(port $port)" }
 }
 
-Write-Host "OceanEmbed stopped." -ForegroundColor Cyan
+Write-Host "SubOceanNet stopped." -ForegroundColor Cyan

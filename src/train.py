@@ -4,7 +4,7 @@ Pairs are (spatial patch of the 7 surface variables) -> (temperature profile at
 the centre cell). Train/validation split strictly BY TIME: the last
 ``training.holdout_last_days`` days are held out (e.g. all of 2023).
 
-Artifacts written to one bundle directory (default data/checkpoints/oceanembed_demo):
+Artifacts written to one bundle directory (default data/checkpoints/suboceannet_demo):
     checkpoint.pt   model weights
     scalars.json    normalization means/stds (inputs + temperature)
     metadata.json   input vars, depths, version, val metrics, history summary
@@ -304,7 +304,7 @@ def run_training(cfg: dict, auto: bool = False, epochs: int | None = None,
                 timedelta(days=int(train_days[-1])))
     meta = {
         "version": str(cfg.get("version", "1")),
-        "model_version": f"{cfg.get('project','oceanembed')}-{cfg.get('version','1')}",
+        "model_version": f"{cfg.get('project','suboceannet')}-{cfg.get('version','1')}",
         "encoder_type": type(model.encoder).__name__,
         "architecture_summary": model.architecture_summary(),
         "parameters": count_parameters(model),
@@ -330,7 +330,7 @@ def run_training(cfg: dict, auto: bool = False, epochs: int | None = None,
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="OceanEmbed trainer")
+    ap = argparse.ArgumentParser(description="SubOceanNet trainer")
     ap.add_argument("--config", default=None)
     ap.add_argument("--auto", action="store_true", help="quick first-run demo profile")
     ap.add_argument("--epochs", type=int, default=None)
@@ -338,7 +338,7 @@ def main(argv=None):
     ap.add_argument("--device", default="cpu")
     args = ap.parse_args(argv)
     if args.config:
-        os.environ["OCEANEMBED_CONFIG"] = args.config
+        os.environ["SUBOCEANNET_CONFIG"] = args.config
     cfg = load_config()
     print(f"[train] source={cfg['data_source']['type']} auto={args.auto}")
     meta = run_training(cfg, auto=args.auto, epochs=args.epochs,

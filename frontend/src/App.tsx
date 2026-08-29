@@ -5,6 +5,7 @@ import MapPanel from "./components/MapCanvas";
 import ToastHost from "./components/ToastHost";
 import Legend from "./components/Legend";
 import { Badge } from "./components/ui";
+import LiveStatusBadge from "./components/LiveStatusBadge";
 import InputLayersView from "./views/InputLayersView";
 import PredictionView from "./views/PredictionView";
 import Volume3DView from "./views/Volume3DView";
@@ -66,7 +67,7 @@ function Shell() {
             <circle cx="16" cy="10" r="4.5" stroke="#f59e0b" strokeWidth="2.2" fill="none" />
           </svg>
           <div className="leading-tight">
-            <h1 className="text-sm font-extrabold tracking-[0.18em] text-[#dbe4f3]">OCEAN<span className="text-cyan-300">EMBED</span></h1>
+            <h1 className="text-sm font-extrabold tracking-[0.18em] text-[#dbe4f3]">SUBOCEAN<span className="text-cyan-300">NET</span></h1>
             <p className="text-[10px] text-[#66779b]">
               satellite surfaces → latent embedding → subsurface temperature · NIO 5–30°N / 45–105°E
             </p>
@@ -85,6 +86,7 @@ function Shell() {
               className="rounded-md border border-[#24365a] bg-[#101b30] px-2 py-1 font-mono text-xs text-[#dbe4f3]"
             />
           </label>
+          <LiveStatusBadge />
           <ModelStatusChip />
         </div>
       </header>

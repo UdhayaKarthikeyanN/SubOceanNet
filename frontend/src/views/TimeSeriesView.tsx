@@ -169,8 +169,8 @@ export default function TimeSeriesView() {
                 label={{ value: "°C", angle: -90, position: "insideLeft", fill: "#66779b", fontSize: 11 }}
                 domain={["auto", "auto"]}
               />
-              <Tooltip contentStyle={{ background: "#0d1526", border: "1px solid #1c2b45", borderRadius: 8 }} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: "#0d1526", border: "1px solid #1c2b45", borderRadius: 8, color: "#dbe4f3" }} itemStyle={{ color: "#dbe4f3" }} labelStyle={{ color: "#9fb0d0" }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} formatter={(value) => <span style={{ color: "#dbe4f3", fontSize: 11 }}>{value}</span>} />
               {selDepthIdxs.map((k, i) => (
                 <Line
                   key={k}

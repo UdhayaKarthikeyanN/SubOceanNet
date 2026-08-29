@@ -56,6 +56,21 @@ def load_input_dataset(cfg=None) -> xr.Dataset:
             raise ValueError(f"Synthetic inputs.nc missing variables: {missing}")
         return _standardize(ds, "time", "depth")[names]
 
+    if src["type"] == "live":
+        from .live.manager import get_manager
+
+        mgr = get_manager(cfg)
+        ds = mgr.get_dataset()
+        if ds.sizes.get("time", 0) == 0:
+            raise FileNotFoundError(
+                "live data has not produced any overlapping day across all 7 variables "
+                "yet - check GET /api/live/status for per-variable freshness"
+            )
+        missing = [n for n in names if n not in ds]
+        if missing:
+            raise ValueError(f"live dataset missing variables: {missing}")
+        return _standardize(ds, "time", "depth")[names]
+
     # ---- real NetCDF mode: data/raw/<variable>.nc --------------------------
     raw = Path(src["netcdf"]["input_dir"])
     if not raw.is_absolute():

@@ -1,4 +1,4 @@
-"""Shared fixtures: a miniature OceanEmbed environment (tiny grid/dates,
+"""Shared fixtures: a miniature SubOceanNet environment (tiny grid/dates,
 real generator + real trainer) so API/model/preprocessing tests stay fast."""
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 def _tiny_config(root: Path) -> dict:
     return {
-        "project": "oceanembed-test",
+        "project": "suboceannet-test",
         "version": "0.0.0",
         "region": {"lat_min": 5.0, "lat_max": 30.0, "lon_min": 45.0, "lon_max": 105.0},
         "grid": {"resolution": 1.0},
@@ -75,7 +75,7 @@ def test_env(tmp_path_factory):
     cfg_dict = _tiny_config(root)
     cfg_path = root / "config.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg_dict))
-    os.environ["OCEANEMBED_CONFIG"] = str(cfg_path)
+    os.environ["SUBOCEANNET_CONFIG"] = str(cfg_path)
 
     from src.config import load_config
     cfg = load_config()

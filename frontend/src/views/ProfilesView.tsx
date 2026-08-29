@@ -132,13 +132,15 @@ export default function ProfilesView() {
                 <ZAxis range={[36, 36]} />
                 <Tooltip
                   contentStyle={TOOLTIP_STYLE}
+                  itemStyle={{ color: "#dbe4f3" }}
+                  labelStyle={{ color: "#9fb0d0" }}
                   cursor={{ strokeDasharray: "4 4", stroke: "#24365a" }}
                   formatter={(v: number | string, n: string) =>
                     n === "Temperature" && typeof v === "number" ? `${v.toFixed(2)} °C` : String(v)
                   }
                   labelFormatter={() => ""}
                 />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} formatter={(value) => <span style={{ color: "#dbe4f3", fontSize: 11 }}>{value}</span>} />
                 {predSeries.map((s, i) => (
                   <Scatter
                     key={`sp${i}`}

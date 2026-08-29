@@ -1,6 +1,6 @@
 """Configuration loading.
 
-The active config is selected with the OCEANEMBED_CONFIG environment variable
+The active config is selected with the SUBOCEANNET_CONFIG environment variable
 (path to a YAML file); it defaults to <project root>/configs/config.yaml.
 Config is re-read per call so tests can point it at a temporary environment.
 """
@@ -14,7 +14,7 @@ from typing import Any, Dict
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CONFIG_ENV_VAR = "OCEANEMBED_CONFIG"
+CONFIG_ENV_VAR = "SUBOCEANNET_CONFIG"
 
 
 def config_path() -> Path:

@@ -78,3 +78,41 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .oe-toast {
   animation: oe-slide-in 0.25s ease-out;
 }
+
+/* recharts dark-theme overrides — force light text on dark bg */
+.recharts-legend-item-text,
+.recharts-default-tooltip,
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  color: #dbe4f3 !important;
+}
+.recharts-legend-item-text {
+  color: #dbe4f3 !important;
+}
+/* SVG text inside recharts is independent of CSS color — override it */
+.recharts-legend-wrapper text,
+.recharts-default-tooltip text,
+.recharts-cartesian-axis-tick text,
+.recharts-label text,
+.recharts-tooltip-cursor text {
+  fill: #dbe4f3 !important;
+}
+/* Axis tick labels */
+.recharts-xAxis text,
+.recharts-yAxis text {
+  fill: #9fb0d0 !important;
+}
+/* Tooltip — force all child text to be light */
+.recharts-tooltip-wrapper * {
+  color: #dbe4f3 !important;
+  fill: #dbe4f3 !important;
+}
+/* Scatter dot hover labels, axis labels, any SVG text */
+.recharts-scatter-symbol text,
+.recharts-reference-line text {
+  fill: #dbe4f3 !important;
+}
+/* Dark dropdowns/selects */
+select, select option {
+  color: #dbe4f3;
+  background-color: #101b30;
+}

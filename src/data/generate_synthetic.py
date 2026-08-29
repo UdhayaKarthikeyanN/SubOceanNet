@@ -299,7 +299,7 @@ def main(argv=None):
 
     import os
     if args.config:
-        os.environ["OCEANEMBED_CONFIG"] = args.config
+        os.environ["SUBOCEANNET_CONFIG"] = args.config
     cfg = load_config()
     if args.start:
         cfg["time_range"]["start"] = args.start

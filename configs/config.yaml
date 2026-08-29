@@ -1,9 +1,9 @@
 # ============================================================================
-# OceanEmbed configuration -- single source of truth for the whole app.
+# SubOceanNet configuration -- single source of truth for the whole app.
 # Swap synthetic <-> real NetCDF data by editing ONLY this file.
 # ============================================================================
 
-project: oceanembed
+project: suboceannet
 version: "1.0.0"
 
 # --- Region of interest (North Indian Ocean) --------------------------------
@@ -58,9 +58,11 @@ input_variables:
 
 # --- Data source -------------------------------------------------------------
 # type: "synthetic" -> physically plausible generated data (demo mode)
-#       "netcdf"     -> real files placed under paths below (no code edits!)
+#       "netcdf"     -> real static files placed under paths below (no code edits!)
+#       "live"       -> auto-refreshed real data from Copernicus Marine + ERA5
+#                       (see data_source.live below and README "Live data mode")
 data_source:
-  type: synthetic
+  type: live
   netcdf:
     # Files are looked up as <input_dir>/<variable_name>.nc using the
     # variable names above (sst.nc, sss.nc, ...). Each file must have dims
@@ -69,6 +71,39 @@ data_source:
     reference_dir: data/reference   # GLORYS12V / ARGO style file with 'temperature' (time, depth, lat, lon)
     time_coord: time
     depth_coord: depth
+
+  # Only used when type: live. Credentials come from .env (see .env.example),
+  # never from this file. The fetch scripts run in an isolated interpreter
+  # (data_source.live.python) so copernicusmarine/cdsapi never touch the
+  # main app's pinned numpy/torch environment - see scripts/live_fetch/.
+  live:
+    cache_dir: data/live_cache
+    python: .venv-live/Scripts/python.exe   # .venv-live/bin/python on Linux/macOS
+    refresh_interval_minutes: 180           # how often the background thread re-fetches
+    max_age_hours: 48                       # cached-real data older than this is flagged stale
+    max_cached_timesteps: 14                # rolling window kept per variable (bounded disk use)
+    fetch_timeout_s: 300                    # per-variable subprocess timeout
+    ocean:
+      provider: copernicus_marine
+      # Verified current (2026-08) via:
+      #   .venv-live\Scripts\copernicusmarine.exe describe -p <product_id> --disable-progress-bar
+      # Catalog ids do change over time - re-run that if a fetch starts
+      # failing with "dataset not found". A variable with an empty
+      # dataset_id is skipped (falls back to cached/synthetic data for that
+      # variable only, not the whole app).
+      variables:
+        # GLOBAL_ANALYSISFORECAST_PHY_001_024 - daily-mean physics analysis/forecast
+        sst:   {dataset_id: "cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m", variable: thetao}
+        sss:   {dataset_id: "cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m", variable: so}
+        cur_u: {dataset_id: "cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m", variable: uo}
+        cur_v: {dataset_id: "cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m", variable: vo}
+        # SEALEVEL_GLO_PHY_L4_NRT_008_046 - dedicated altimetry sea-level-anomaly product
+        sla:   {dataset_id: "cmems_obs-sl_glo_phy-ssh_nrt_allsat-l4-duacs-0.125deg_P1D", variable: sla}
+    wind:
+      provider: era5
+      variables:
+        wind_u: 10m_u_component_of_wind
+        wind_v: 10m_v_component_of_wind
 
 time_range:
   start: "2022-01-01"
@@ -112,7 +147,7 @@ training:
 
 paths:
   checkpoints_dir: data/checkpoints
-  bundle_name: oceanembed_demo
+  bundle_name: suboceannet_demo
   scalars_file: scalars.json      # inside bundle dir
   cache_dir: data/cache
   synthetic_dir: data/synthetic

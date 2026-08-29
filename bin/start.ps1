@@ -1,4 +1,4 @@
-# OceanEmbed launcher: backend (uvicorn) + frontend (vite dev).
+# SubOceanNet launcher: backend (uvicorn) + frontend (vite dev).
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File bin\start.ps1 [-ApiPort 8000] [-WebPort 5173] [-NoFrontend]
 param(
@@ -13,6 +13,29 @@ New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
 
 function Test-PortListening([int]$Port) {
     return [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+}
+
+# ---------- data source mode (informational only - config.yaml is the source of truth) ----------
+$ConfigPath = $env:SUBOCEANNET_CONFIG
+if (-not $ConfigPath) { $ConfigPath = Join-Path $Root "configs\config.yaml" }
+$DataMode = "unknown"
+if (Test-Path $ConfigPath) {
+    $m = Select-String -Path $ConfigPath -Pattern '^\s*type:\s*(\S+)' | Select-Object -First 1
+    if ($m) { $DataMode = $m.Matches[0].Groups[1].Value }
+}
+$ModeColor = switch ($DataMode) { "live" { "Cyan" } "netcdf" { "Green" } default { "Yellow" } }
+Write-Host "[mode]  data_source.type = $DataMode" -ForegroundColor $ModeColor
+if ($DataMode -eq "live") {
+    $LivePy = Join-Path $Root ".venv-live\Scripts\python.exe"
+    if (-not (Test-Path $LivePy)) {
+        Write-Host "        WARNING: .venv-live not set up - live fetches will fall back to" -ForegroundColor Yellow
+        Write-Host "        SYNTHETIC FALLBACK until you run:" -ForegroundColor Yellow
+        Write-Host "          python -m venv .venv-live" -ForegroundColor Yellow
+        Write-Host "          .venv-live\Scripts\python.exe -m pip install -r scripts\live_fetch\requirements.txt" -ForegroundColor Yellow
+    }
+    if (-not (Test-Path (Join-Path $Root ".env"))) {
+        Write-Host "        WARNING: .env not found - copy .env.example and fill in credentials" -ForegroundColor Yellow
+    }
 }
 
 # ---------- backend ----------
@@ -44,7 +67,7 @@ if ($NoFrontend) {
     }
     # point the vite proxy at a non-default API port when needed
     $envLine = ""
-    if ($ApiPort -ne 8000) { $envLine = "`$env:OCEANEMBED_API='http://127.0.0.1:$ApiPort'; " }
+    if ($ApiPort -ne 8000) { $envLine = "`$env:SUBOCEANNET_API='http://127.0.0.1:$ApiPort'; " }
     $inner = "${envLine}Set-Location '$FeDir'; npm.cmd run dev -- --port $WebPort"
     $proc = Start-Process -FilePath "powershell.exe" `
         -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-Command",$inner `

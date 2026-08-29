@@ -1,0 +1,12 @@
+# Isolated environment for the live-data fetcher (Copernicus Marine + ERA5/CDS).
+# Deliberately NOT merged into the top-level requirements.txt: copernicusmarine
+# pulls in zarr/dask which require numpy>=2, conflicting with this project's
+# pinned numpy==1.26.4 / torch==2.5.1 in .venv. This fetcher runs as a
+# separate subprocess and only ever writes plain NetCDF files that the main
+# app reads with its existing xarray/netCDF4 install - see src/data/live/.
+copernicusmarine>=2.4,<3
+cdsapi>=0.7,<1
+xarray>=2024.7
+netCDF4>=1.7
+numpy
+python-dotenv>=1.0

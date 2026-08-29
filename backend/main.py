@@ -1,4 +1,4 @@
-﻿"""OceanEmbed FastAPI backend (F5).
+﻿"""SubOceanNet FastAPI backend (F5).
 
 Run:  uvicorn backend.main:app --port 8000   (from the project root)
 
@@ -8,6 +8,7 @@ Long predictions run as background jobs polled via GET /api/jobs/{id}.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import traceback
@@ -56,6 +57,9 @@ def _cleanup_jobs():
 async def lifespan(app: FastAPI):
     t = threading.Thread(target=_bootstrap, name="oe-bootstrap", daemon=True)
     t.start()
+    if get_config()["data_source"]["type"] == "live":
+        from src.data.live.manager import get_manager
+        get_manager(get_config()).start_background_refresh()
     yield
 
 
@@ -106,7 +110,7 @@ class JobOut(BaseModel):
 
 
 app = FastAPI(
-    title="OceanEmbed API",
+    title="SubOceanNet API",
     description=(
         "Reconstructs 3D subsurface ocean temperature in the North Indian Ocean "
         "from 7 satellite surface observations via an AI encoder-decoder. "
@@ -115,10 +119,13 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+_DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173",
+                         "http://localhost:4173", "http://127.0.0.1:4173"]
+_cors_env = os.environ.get("SUBOCEANNET_CORS_ORIGINS", "")
+_cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()] or _DEFAULT_CORS_ORIGINS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
-                   "http://localhost:4173", "http://127.0.0.1:4173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -184,6 +191,8 @@ _DS_CACHE: dict = {}
 
 def input_dataset(cfg):
     key = cfg["data_source"]["type"]
+    if key == "live":
+        return data_loaders.load_input_dataset(cfg)  # refreshed in the background; never cache
     ds = _DS_CACHE.get(key)
     if ds is None:
         ds = data_loaders.load_input_dataset(cfg)
@@ -263,6 +272,36 @@ def model_info():
 
 
 # ---------------------------------------------------------------------------
+# Live data pipeline
+# ---------------------------------------------------------------------------
+
+@app.get("/api/live/status")
+def live_status():
+    """Per-variable live-data health: REAL / CACHED REAL / SYNTHETIC FALLBACK,
+    provider, observation time, last fetch attempt, data age, and any error.
+    Meaningful in any data_source.type - it reports live_mode_active: false
+    (with an empty variables map) when live mode isn't the active source."""
+    from src.data.live.manager import status_payload
+
+    cfg = get_config()
+    return json_safe(status_payload(cfg))
+
+
+@app.get("/api/live/latest")
+def live_latest():
+    """The latest calendar day common to all 7 live variables, plus a quick
+    per-variable value summary and status. Only meaningful in live mode;
+    returns 409 otherwise so the frontend can distinguish "not live" from
+    "live but not ready yet"."""
+    cfg = get_config()
+    if cfg["data_source"]["type"] != "live":
+        abort(409, "data_source.type is not 'live' - this endpoint has nothing to report")
+    from src.data.live.manager import latest_payload
+
+    return json_safe(latest_payload(cfg))
+
+
+# ---------------------------------------------------------------------------
 # Input layers
 # ---------------------------------------------------------------------------
 
@@ -287,7 +326,10 @@ def layer(variable: str, date: str | None = Query(None), region: str | None = Qu
     reg = None
     if region:
         reg, _ = valid_region(_parse_json_param(region, "region"), cfg, enforce_cap=False)
-    ds = input_dataset(cfg)
+    try:
+        ds = input_dataset(cfg)
+    except (FileNotFoundError, ValueError) as e:
+        abort(503, f"input data not ready: {e}")
     da = ds[variable]
     tidx = data_loaders.nearest_date_index(ds, d)
     arr = da.isel(time=tidx)
@@ -393,7 +435,10 @@ def profile(lat: float, lon: float, date: str | None = Query(None)):
     predictor = require_model()
     _check_point(lat, lon, cfg)
     d = valid_date(date, cfg)
-    res = predictor.predict_points([(lat, lon)], d)
+    try:
+        res = predictor.predict_points([(lat, lon)], d)
+    except (FileNotFoundError, ValueError) as e:
+        abort(503, f"input data not ready: {e}")
     pt = res["points"][0]
 
     # reference overlay (clean truth / GLORYS)
@@ -450,8 +495,11 @@ def timeseries(lat: float = Query(None), lon: float = Query(None),
     def cb(p, m):
         prog["p"] = p
 
-    ts = predictor.timeseries(lat, lon, start, end, stride_days=stride_days,
-                              region=reg, progress_cb=cb)
+    try:
+        ts = predictor.timeseries(lat, lon, start, end, stride_days=stride_days,
+                                  region=reg, progress_cb=cb)
+    except (FileNotFoundError, ValueError) as e:
+        abort(503, f"input data not ready: {e}")
     temps = np.asarray([[np.nan if v is None else v for v in row] for row in ts["temperature"]],
                        dtype=np.float64)
     try:
@@ -568,10 +616,48 @@ def validation(region: str = Query(..., description="GeoJSON Polygon (URL-encode
 
 
 # ---------------------------------------------------------------------------
+# Isosurface rendering via PyVista
+# ---------------------------------------------------------------------------
+
+@app.get("/api/isosurface")
+def isosurface(date: str = Query(..., description="ISO date YYYY-MM-DD"),
+               region: str = Query(..., description="GeoJSON Polygon")):
+    """Render a 3D isosurface using PyVista and return as HTML."""
+    cfg = get_config()
+    predictor = require_model()
+    reg, mask = valid_region(_parse_json_param(region, "region"), cfg)
+    d = valid_date(date, cfg)
+
+    res = predictor.predict_region(d, reg, mc_passes=1)
+
+    # Extract arrays from prediction result
+    lats = res["lats"]
+    lons = res["lons"]
+    depths = res["depths"]
+    temp = res["temperature"]  # (nz, ny, nx)
+    resolved_date = res["date"]
+
+    try:
+        from src.rendering.isosurface import render_isosurface_html
+        html = render_isosurface_html(
+            lats=lats, lons=lons, depths=depths,
+            temperature=temp, date_str=resolved_date)
+        return {
+            "html": html,
+            "date": resolved_date,
+            "lats": lats,
+            "lons": lons,
+            "depths": depths,
+        }
+    except Exception as exc:
+        traceback.print_exc()
+        abort(500, f"isosurface rendering failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Optional static hosting of a built frontend
 # ---------------------------------------------------------------------------
 _frontend_dist = get_config()["_root"] + "/frontend/dist"
-import os  # noqa: E402
 if os.path.isdir(_frontend_dist):  # pragma: no cover
     from fastapi.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")

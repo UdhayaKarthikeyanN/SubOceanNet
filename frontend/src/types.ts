@@ -35,7 +35,7 @@ export interface MetaResponse {
   presets: Preset[];
   mc_passes: number;
   max_region_cells: number;
-  data_source: "synthetic" | "netcdf";
+  data_source: "synthetic" | "netcdf" | "live";
   demo_mode: boolean;
   land_polygons: GeoJSON.FeatureCollection;
   islands: { lat: number; lon: number; name: string }[];
@@ -155,6 +155,36 @@ export interface ModelInfo {
     val_rmse_c: number[];
     lr: number[];
   };
+}
+
+export type LiveSource = "REAL" | "CACHED REAL" | "SYNTHETIC FALLBACK";
+
+export interface LiveVariableStatus {
+  source: LiveSource;
+  provider: string | null;
+  observation_time: string | null;
+  fetched_at: string | null;
+  stale: boolean;
+  error: string | null;
+  data_age_hours: number | null;
+  min?: number;
+  max?: number;
+  mean?: number;
+}
+
+export interface LiveStatusResponse {
+  mode: "synthetic" | "netcdf" | "live";
+  live_mode_active: boolean;
+  refresh_interval_minutes: number | null;
+  max_age_hours: number | null;
+  variables: Record<string, LiveVariableStatus>;
+}
+
+export interface LiveLatestResponse {
+  mode: "synthetic" | "netcdf" | "live";
+  latest_common_date: string | null;
+  note: string;
+  variables: Record<string, LiveVariableStatus>;
 }
 
 /** What the shared Leaflet canvas renders. */

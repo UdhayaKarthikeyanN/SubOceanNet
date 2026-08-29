@@ -1,5 +1,7 @@
 import type {
   LayerData,
+  LiveLatestResponse,
+  LiveStatusResponse,
   MetaResponse,
   ModelInfo,
   PredictResult,
@@ -103,6 +105,15 @@ export const api = {
         scatter_depth: p.scatter_depth,
       })}`
     ),
+
+  getIsosurface: (p: { region: unknown; date: string }) =>
+    j<{ html: string; date: string; lats: number[]; lons: number[]; depths: number[] }>(
+      `/api/isosurface${qs({ region: JSON.stringify(p.region), date: p.date })}`
+    ),
+
+  getLiveStatus: () => j<LiveStatusResponse>("/api/live/status"),
+
+  getLiveLatest: () => j<LiveLatestResponse>("/api/live/latest"),
 };
 
 export async function pollJob(

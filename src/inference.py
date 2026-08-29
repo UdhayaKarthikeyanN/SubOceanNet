@@ -33,6 +33,8 @@ def json_safe(obj):
     """Recursively convert numpy arrays / NaN to JSON-safe structures."""
     if isinstance(obj, np.ndarray):
         return json_safe(obj.tolist())
+    if isinstance(obj, (bool, np.bool_)):  # must precede the int check: bool is an int subclass
+        return bool(obj)
     if isinstance(obj, (np.floating, float)):
         f = float(obj)
         return f if np.isfinite(f) else None
@@ -74,7 +76,14 @@ class Predictor:
 
     @property
     def ds(self):
-        """Cached (lazy) xarray handle on the 7 surface inputs."""
+        """Cached (lazy) xarray handle on the 7 surface inputs.
+
+        In live mode the underlying data changes on a background refresh
+        cadence, so it is reloaded on every access (cheap: small region,
+        local disk cache) instead of being cached for the process lifetime.
+        """
+        if self.cfg["data_source"]["type"] == "live":
+            return data_loaders.load_input_dataset(self.cfg)
         if self._ds is None:
             self._ds = data_loaders.load_input_dataset(self.cfg)
         return self._ds
@@ -296,7 +305,7 @@ class Predictor:
 # ---------------------------------------------------------------------------
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="OceanEmbed inference")
+    ap = argparse.ArgumentParser(description="SubOceanNet inference")
     ap.add_argument("--date", required=True, help="YYYY-MM-DD")
     ap.add_argument("--region", required=True,
                     help="GeoJSON Polygon as JSON string, or @path/to/file.json")

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OceanEmbed shutdown (Linux/macOS): kills pids recorded in .run/, then any
+# SubOceanNet shutdown (Linux/macOS): kills pids recorded in .run/, then any
 # listener on the given ports whose cwd lies inside this project tree.
 # Usage: bin/stop.sh [api_port] [web_port]
 API_PORT="${1:-8000}"
@@ -35,4 +35,4 @@ for pair in "backend $API_PORT" "frontend $WEB_PORT"; do
         done
     fi
 done
-echo "OceanEmbed stopped."
+echo "SubOceanNet stopped."

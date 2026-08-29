@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { api, ApiError } from "../api/client";
 import type {
   GeoJSONPolygon,
+  LiveStatusResponse,
   MetaResponse,
   ModelInfo,
   PredictResult,
@@ -34,6 +35,7 @@ export interface ToastMsg {
 interface AppState {
   meta: MetaResponse | null;
   modelInfo: ModelInfo | null;
+  liveStatus: LiveStatusResponse | null;
   date: string;
   setDate: (d: string) => void;
   region: SelectedRegion | null;
@@ -77,6 +79,7 @@ let toastSeq = 1;
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [meta, setMeta] = useState<MetaResponse | null>(null);
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
+  const [liveStatus, setLiveStatus] = useState<LiveStatusResponse | null>(null);
   const [date, setDate] = useState("");
   const [region, setRegionRaw] = useState<SelectedRegion | null>(null);
   const [tab, setTab] = useState<TabId>("inputs");
@@ -156,6 +159,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // live-data status polling - only active once /api/meta confirms live mode
+  useEffect(() => {
+    if (meta?.data_source !== "live") {
+      setLiveStatus(null);
+      return;
+    }
+    let stop = false;
+    const tick = async () => {
+      try {
+        const status = await api.getLiveStatus();
+        if (!stop) setLiveStatus(status);
+      } catch {
+        /* transient - keep last known status */
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 30_000);
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
+  }, [meta?.data_source]);
+
   const addProfilePoint = useCallback((lat: number, lon: number) => {
     setProfilePoints((ps) =>
       ps.length >= 5 ? ps : [...ps, { id: Date.now() + ps.length, lat, lon }]
@@ -166,7 +192,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<AppState>(
     () => ({
-      meta, modelInfo, date, setDate,
+      meta, modelInfo, liveStatus, date, setDate,
       region, setRegion, tab, setTab, stage, setStage,
       mapLayer, setMapLayer, prediction, setPrediction,
       depthIdx, setDepthIdx, playingDepth, setPlayingDepth,
@@ -177,7 +203,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toasts, pushToast, dismissToast,
     }),
     [
-      meta, modelInfo, date, region, setRegion, tab, stage, mapLayer, prediction,
+      meta, modelInfo, liveStatus, date, region, setRegion, tab, stage, mapLayer, prediction,
       depthIdx, playingDepth, showUncertainty, profilePoints, addProfilePoint,
       clearProfilePoints, clickMode, hoverReadout, toasts, pushToast, dismissToast,
     ]
