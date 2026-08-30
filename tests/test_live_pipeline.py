@@ -114,6 +114,58 @@ def test_read_variable_cache_none_when_never_written(live_cfg):
     assert live_cache.read_variable_cache(live_cfg, "sst") is None
 
 
+def test_cache_persists_source_tag_and_prefers_real_over_later_synthetic(live_cfg):
+    """A same-or-later-dated synthetic-fallback entry must never shadow a
+    genuinely fetched real one. _synthesize_fallback() always stamps
+    "today", which would otherwise always chronologically outrank a
+    lagging real provider like ERA5 (~5 days behind) forever - this is
+    exactly the bug that made the live wind map silently keep showing the
+    synthetic generator's texture even after a real ERA5 fetch succeeded."""
+    from src.data.live import cache as live_cache
+    from src.data.live.manager import _latest_real_only
+
+    lat = np.arange(5.0, 30.001, 5.0)
+    lon = np.arange(45.0, 105.001, 5.0)
+
+    def _da(day):
+        arr = np.full((len(lat), len(lon)), 20.0, dtype="f4")
+        return xr.DataArray(
+            arr[np.newaxis], dims=("time", "lat", "lon"),
+            coords={"time": [np.datetime64(day, "ns")], "lat": lat, "lon": lon}, name="sst",
+        )
+
+    live_cache.append_timestep(live_cfg, "sst", _da("2026-01-01"), source="real")
+    live_cache.append_timestep(live_cfg, "sst", _da("2026-01-05"), source="synthetic")
+
+    cached = live_cache.read_variable_cache(live_cfg, "sst")
+    assert cached.sizes["time"] == 2
+    assert list(cached["source"].values) == ["real", "synthetic"]
+
+    filtered = _latest_real_only(cached)
+    assert str(filtered["time"].values[-1])[:10] == "2026-01-01", \
+        "must prefer the real entry even though the synthetic one is chronologically later"
+
+
+def test_get_dataset_ignores_stale_synthetic_when_real_exists(live_cfg):
+    from src.data.live import manager as mgr_mod, providers
+
+    mgr = mgr_mod.get_manager(live_cfg)
+    fake = _fake_fetch_factory(live_cfg, obs_date="2026-01-01")
+    with mock.patch.object(providers, "fetch_ocean_variable", side_effect=fake), \
+         mock.patch.object(providers, "fetch_wind_variable", side_effect=fake):
+        mgr.refresh_all()
+
+    # simulate a synthetic snapshot landing on top of the real day, dated
+    # "today" (as _synthesize_fallback always does) - definitely later than
+    # the fixed 2026-01-01 real fetch above
+    mgr._synthesize_fallback("sst")
+
+    ds = mgr.get_dataset()
+    resolved_day = str(ds["time"].values[0])[:10]
+    assert resolved_day == "2026-01-01", \
+        "get_dataset() must serve the real day, not a later-dated synthetic one"
+
+
 # ---------------------------------------------------------------------------
 # providers.py (subprocess bridge - real code path, no network)
 # ---------------------------------------------------------------------------

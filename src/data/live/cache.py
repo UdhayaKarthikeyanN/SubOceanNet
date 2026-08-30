@@ -55,26 +55,45 @@ def variable_cache_path(cfg: dict, name: str) -> Path:
     return cache_dir(cfg) / f"{name}.nc"
 
 
-def append_timestep(cfg: dict, name: str, da: xr.DataArray, max_timesteps: int = 14) -> None:
+def append_timestep(cfg: dict, name: str, da: xr.DataArray, max_timesteps: int = 14,
+                    source: str = "real") -> None:
     """Merge one new (time, lat, lon) slice into the rolling cache file for
     `name`. Same-day duplicates are replaced by the newer fetch; only the
-    most recent `max_timesteps` are kept (bounded disk use)."""
+    most recent `max_timesteps` are kept (bounded disk use).
+
+    `source` ("real" or "synthetic") is persisted per-timestep so callers
+    picking "the latest day" can prefer a real entry over a same-or-later
+    dated synthetic-fallback one - see manager.py's _latest_real_only()."""
     d = cache_dir(cfg)
     d.mkdir(parents=True, exist_ok=True)
     path = variable_cache_path(cfg, name)
 
     if "time" not in da.dims:
         da = da.expand_dims("time")
+    da = da.assign_coords(source=("time", [source] * da.sizes["time"]))
 
     with _IO_LOCK:
         if path.exists():
             with xr.open_dataarray(path) as existing:
-                combined = xr.concat([existing.load(), da], dim="time")
+                existing = existing.load()
+                if "source" not in existing.coords:  # cache written before this field existed
+                    existing = existing.assign_coords(
+                        source=("time", ["real"] * existing.sizes["time"]))
+                # new fetch (da) FIRST: np.unique(..., return_index=True) below
+                # keeps the first occurrence of each duplicate time value, so
+                # ordering here is what actually makes "newer fetch wins" on a
+                # same-day re-fetch - existing-first would silently keep the
+                # stale entry instead (this was backwards before).
+                combined = xr.concat([da, existing], dim="time")
         else:
             combined = da
 
         _, first_idx = np.unique(combined["time"].values, return_index=True)
-        combined = combined.isel(time=np.sort(first_idx))
+        # first_idx indexes into `combined` in concat order (new fetch first),
+        # not chronological order - sort by the actual time values, not by
+        # index position, so "latest" (isel(time=-1) elsewhere) stays correct
+        # regardless of which side of the concat a given day came from.
+        combined = combined.isel(time=first_idx).sortby("time")
         if combined.sizes["time"] > max_timesteps:
             combined = combined.isel(time=slice(-max_timesteps, None))
 

@@ -220,8 +220,17 @@ def interpolate_grid(ds: xr.Dataset, target_lat: np.ndarray,
     )
     if same:
         return ds
+    # fill_value=nan (never "extrapolate"): live-fetched provider grids don't
+    # always cover the domain edges exactly (e.g. Copernicus Marine's native
+    # 0.0833deg grid doesn't land exactly on lat=30.0), and extrapolating
+    # fabricates a full row/column of invented values there - including over
+    # land, since linear extrapolation has no concept of land/no-data. NaN
+    # lets the normal land-aware gap-fill step handle any real edge gaps
+    # instead of silently inventing data - consistent with this pipeline's
+    # "never show a value we can't stand behind" rule (see OCEAN_DOMAIN_VARS
+    # above).
     return ds.interp(lat=target_lat, lon=target_lon, method="linear",
-                     kwargs={"fill_value": "extrapolate"})
+                     kwargs={"fill_value": np.nan})
 
 
 def to_daily(ds: xr.Dataset) -> xr.Dataset:

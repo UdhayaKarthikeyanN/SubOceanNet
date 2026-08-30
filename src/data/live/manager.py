@@ -54,6 +54,23 @@ def _regrid_to_target(da: xr.DataArray, cfg: dict, name: str) -> xr.DataArray:
     return regridded[name]
 
 
+def _latest_real_only(da: xr.DataArray) -> xr.DataArray:
+    """Drop purely-synthetic-fallback timesteps when any real one exists.
+
+    _synthesize_fallback() always stamps its single-day snapshot with
+    today's date. Real fetches from a lagging provider (ERA5 winds are
+    routinely ~5 days behind) will then never chronologically "catch up" to
+    that stamp, so picking the raw latest timestep would let one synthetic
+    fallback permanently shadow genuine data forever. Cache files written
+    before this field existed have no "source" coord - treated as real."""
+    if "source" not in da.coords:
+        return da
+    real_idx = np.where(da["source"].values != "synthetic")[0]
+    if len(real_idx) == 0:
+        return da  # nothing but synthetic exists - that's genuinely all there is
+    return da.isel(time=real_idx).drop_vars("source", errors="ignore")
+
+
 def _hours_since(iso_or_ts) -> float | None:
     if not iso_or_ts:
         return None
@@ -120,7 +137,7 @@ class LiveDataManager:
             name=name,
         )
         max_ts = int(cfg["data_source"]["live"].get("max_cached_timesteps", 14))
-        live_cache.append_timestep(cfg, name, da, max_timesteps=max_ts)
+        live_cache.append_timestep(cfg, name, da, max_timesteps=max_ts, source="synthetic")
 
     # -- per-variable refresh ---------------------------------------------------
     def _refresh_one(self, name: str, force: bool = False) -> dict:
@@ -144,6 +161,7 @@ class LiveDataManager:
             if age_since_fetch_h < refresh_interval_h:
                 cached = live_cache.read_variable_cache(cfg, name)
                 if cached is not None and cached.sizes.get("time", 0) > 0:
+                    cached = _latest_real_only(cached)
                     last_t = pd.Timestamp(cached["time"].values[-1])
                     stale = bool((_hours_since(last_t) or 0.0) > max_age_h)
                     return {
@@ -198,6 +216,7 @@ class LiveDataManager:
         except Exception as exc:  # noqa: BLE001 - any provider/subprocess failure -> fallback
             cached = live_cache.read_variable_cache(cfg, name)
             if cached is not None and cached.sizes.get("time", 0) > 0:
+                cached = _latest_real_only(cached)
                 last_t = pd.Timestamp(cached["time"].values[-1])
                 age_h = _hours_since(last_t) or 0.0
                 return {
@@ -306,6 +325,7 @@ class LiveDataManager:
             da = live_cache.read_variable_cache(self.cfg, name)
             if da is None or da.sizes.get("time", 0) == 0:
                 continue
+            da = _latest_real_only(da)
             per_var[name] = da.isel(time=-1, drop=True)
             t = pd.Timestamp(da["time"].values[-1])
             if latest_obs is None or t > latest_obs:
