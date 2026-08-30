@@ -22,10 +22,10 @@ import json
 import os
 import sys
 import time
-from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 import torch
 import torch.nn.functional as F
@@ -73,7 +73,12 @@ class SurfaceProfileDataset(Dataset):
         self.ndays, _, self.ny, self.nx = self.inputs.shape[0], len(ds_tr["depth"]), \
             self.inputs.shape[2], self.inputs.shape[3]
 
-        ocean = np.isfinite(self.truth[:, 0]).all(axis=0)      # (H, W) True=ocean
+        # True only where EVERY depth (not just the surface) is finite on
+        # every day - real bathymetry means shelf cells can have valid SST
+        # but sit above the seafloor at deeper configured levels (e.g. NaN
+        # at 1000m), which a surface-only mask would still pick as a
+        # training center and poison the loss with a partially-NaN target.
+        ocean = np.isfinite(self.truth).all(axis=(0, 1))       # (H, W) True=full-depth ocean
         self.ocean_ij = np.argwhere(ocean)
 
         # per-variable input normalization (parity with inference pipeline)
@@ -138,7 +143,44 @@ class SurfaceProfileDataset(Dataset):
 # Scalars / persistence
 # ---------------------------------------------------------------------------
 
-def ensure_scalars(cfg: dict, force: bool = False) -> tuple[dict, Path]:
+def resolve_training_dataset_paths(cfg: dict, force_refresh: bool = False) -> tuple[Path, Path]:
+    """Where to read (patch-inputs, temperature-truth) from for training.
+
+    Synthetic mode reads data/synthetic/{inputs.nc,truth.nc} directly, same
+    as always. Any other data_source.type (netcdf/live) routes through
+    src.data.loaders - the SAME loading logic backend/main.py uses for
+    serving - then materializes the result to a small on-disk cache pair,
+    since SurfaceProfileDataset opens files by path rather than taking an
+    in-memory Dataset.
+    """
+    from src.data.loaders import synthetic_dir
+    if cfg["data_source"]["type"] == "synthetic":
+        syn = synthetic_dir(cfg)
+        inputs_path, truth_path = syn / "inputs.nc", syn / "truth.nc"
+        if not inputs_path.exists():
+            raise FileNotFoundError(
+                f"Dataset missing ({inputs_path}). Run: python -m src.data.generate_synthetic")
+        return inputs_path, truth_path
+
+    cache_dir = Path(cfg["paths"].get("cache_dir", "data/cache"))
+    if not cache_dir.is_absolute():
+        cache_dir = Path(cfg["_root"]) / cache_dir
+    inputs_path = cache_dir / "train_merged_inputs.nc"
+    truth_path = cache_dir / "train_merged_truth.nc"
+    if inputs_path.exists() and truth_path.exists() and not force_refresh:
+        return inputs_path, truth_path
+
+    from src.data.loaders import load_input_dataset, load_reference_dataset
+    ds_in = load_input_dataset(cfg)
+    ds_tr, _label = load_reference_dataset(cfg)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    ds_in.to_netcdf(inputs_path)
+    ds_tr.to_netcdf(truth_path)
+    return inputs_path, truth_path
+
+
+def ensure_scalars(cfg: dict, force: bool = False,
+                   inputs_path: Path | None = None, truth_path: Path | None = None) -> tuple[dict, Path]:
     import xarray as xr
 
     bdir = bundle_dir(cfg)
@@ -146,14 +188,9 @@ def ensure_scalars(cfg: dict, force: bool = False) -> tuple[dict, Path]:
     if spath.exists() and not force:
         return json.loads(spath.read_text()), spath
 
-    root = Path(cfg["_root"])
-    from src.data.loaders import synthetic_dir
-    syn = synthetic_dir(cfg)
-    inputs_path = syn / "inputs.nc"
-    truth_path = syn / "truth.nc"
-    if not inputs_path.exists():
-        raise FileNotFoundError(
-            f"Dataset missing ({inputs_path}). Run: python -m src.data.generate_synthetic")
+    if inputs_path is None or truth_path is None:
+        inputs_path, truth_path = resolve_training_dataset_paths(cfg)
+
     from src.data.preprocessing import compute_scalars, save_scalars
     ds_in = xr.open_dataset(inputs_path)[input_variable_names(cfg)]
     ds_tr = xr.open_dataset(truth_path)["temperature"]
@@ -198,24 +235,19 @@ def run_training(cfg: dict, auto: bool = False, epochs: int | None = None,
     seed = int(tcfg.get("seed", 42))
     torch.manual_seed(seed); np.random.seed(seed)
 
-    root = Path(cfg["_root"])
-    from src.data.loaders import synthetic_dir
-    syn = synthetic_dir(cfg)
-    inputs_nc = syn / "inputs.nc"
-    truth_nc = syn / "truth.nc"
-    if not inputs_nc.exists():
-        raise FileNotFoundError(
-            f"Dataset missing ({inputs_nc}). Run: python -m src.data.generate_synthetic")
+    inputs_nc, truth_nc = resolve_training_dataset_paths(cfg)
 
     import xarray as xr
-    n_time = xr.open_dataset(inputs_nc).sizes["time"]
+    with xr.open_dataset(inputs_nc) as _ds_probe:
+        n_time = _ds_probe.sizes["time"]
+        time_values = _ds_probe["time"].values
     holdout = int(tcfg.get("holdout_last_days", 365))
     stride = int(tcfg.get("preload_day_stride", 4))
     split_t0 = max(n_time - holdout, int(n_time * 0.75))
     train_days = np.arange(0, split_t0, max(stride // 2, 1))
     val_days = np.arange(split_t0, n_time, stride)
 
-    scalars, _ = ensure_scalars(cfg)
+    scalars, _ = ensure_scalars(cfg, inputs_path=inputs_nc, truth_path=truth_nc)
     order = input_variable_names(cfg)
     patch = int(cfg["inference"]["patch_size"])
 
@@ -298,10 +330,11 @@ def run_training(cfg: dict, auto: bool = False, epochs: int | None = None,
 
     # ---- persist bundle ----
     cb(96, "saving checkpoint bundle")
-    tr_dates = (date.fromisoformat(str(cfg["time_range"]["start"])) +
-                timedelta(days=int(train_days[0])),
-                date.fromisoformat(str(cfg["time_range"]["start"])) +
-                timedelta(days=int(train_days[-1])))
+    # Actual dates from the dataset's own time coordinate, not an offset from
+    # cfg["time_range"]["start"] - that config value is the synthetic
+    # generator's fixed window and is meaningless for real netcdf/live data.
+    tr_dates = (pd.Timestamp(time_values[train_days[0]]).date(),
+                pd.Timestamp(time_values[train_days[-1]]).date())
     meta = {
         "version": str(cfg.get("version", "1")),
         "model_version": f"{cfg.get('project','suboceannet')}-{cfg.get('version','1')}",

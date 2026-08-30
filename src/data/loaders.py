@@ -125,9 +125,17 @@ def load_reference_dataset(cfg=None) -> tuple[xr.Dataset, str]:
             # would be a major regression. Callers must do their own
             # .values/.sel() reads inside NETCDF_IO_LOCK instead (see
             # backend/main.py) since that's where the actual lazy read
-            # happens.
+            # happens. open_mfdataset's default chunking needs dask, which
+            # this project deliberately doesn't install (numpy>=2 conflict
+            # with pinned torch/numpy - see scripts/live_fetch/requirements.txt)
+            # - chunks=None keeps every file's netCDF4 lazy-disk-read
+            # behavior (same as the synthetic branch below) without it.
+            # A single file skips the multi-file combine machinery entirely.
             with NETCDF_IO_LOCK:
-                ds = xr.open_mfdataset(files, combine="by_coords")
+                if len(files) == 1:
+                    ds = xr.open_dataset(files[0], engine="netcdf4")
+                else:
+                    ds = xr.open_mfdataset(files, combine="by_coords", chunks=None)
             ds = _standardize(ds, ref_cfg.get("time_coord", "time"),
                               ref_cfg.get("depth_coord", "depth"))
             if "temperature" not in ds:
