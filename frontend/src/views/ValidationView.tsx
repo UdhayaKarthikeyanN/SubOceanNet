@@ -6,7 +6,7 @@ import {
 import { api } from "../api/client";
 import { useApp } from "../state/AppContext";
 import { hexStops } from "../utils/colormap";
-import { Badge, Button, Card, EmptyState, Skeleton } from "../components/ui";
+import { Button, Card, EmptyState, Skeleton } from "../components/ui";
 import type { MetricRow, ValidationResponse } from "../types";
 
 const BAND_COLORS: Record<string, string> = {
@@ -64,13 +64,6 @@ export default function ValidationView() {
       <Card
         title="Validation dashboard"
         subtitle={`${res ? `${res.date_start} → ${res.date_end} (${res.days_sampled} day(s) sampled) · ${res.region_cells} cells` : "computing..."}`}
-        right={
-          res?.demo_mode ? (
-            <Badge tone="amber">SYNTHETIC REFERENCE — DEMO MODE</Badge>
-          ) : (
-            <Badge tone="green">GLORYS / ARGO reference</Badge>
-          )
-        }
       >
         {loading && !res ? (
           <>
@@ -191,7 +184,6 @@ export default function ValidationView() {
               </ResponsiveContainer>
             </div>
 
-            <p className="mt-3 text-[11px] leading-relaxed text-[#66779b]">{res.skill_note}</p>
           </>
         )}
       </Card>

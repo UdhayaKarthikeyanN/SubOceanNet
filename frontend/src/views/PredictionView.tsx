@@ -3,14 +3,8 @@ import { pollJob, api } from "../api/client";
 import { useApp } from "../state/AppContext";
 import DepthSlider from "../components/DepthSlider";
 import Legend from "../components/Legend";
-import { Badge, Button, Card, EmptyState, ProgressBar, Stat } from "../components/ui";
-
-const STAGE_LABELS: Record<string, string> = {
-  queued: "queued on server",
-  preprocessing: "stage 01 -> preprocessing surface inputs",
-  embedding: "stage 02 -> encoder embedding patches",
-  decoding: "stage 03 -> decoding 15 temperature levels",
-};
+import PredictionProgress from "../components/PredictionProgress";
+import { Badge, Button, Card, EmptyState, Stat } from "../components/ui";
 
 export default function PredictionView() {
   const {
@@ -18,7 +12,7 @@ export default function PredictionView() {
     depthIdx, showUncertainty, setShowUncertainty,
     setMapLayer, setStage, playingDepth, pushToast,
   } = useApp();
-  const [job, setJob] = useState<{ progress: number; stage: string } | null>(null);
+  const [job, setJob] = useState<{ progress: number; stage: string; message?: string } | null>(null);
 
   useEffect(() => {
     setStage(prediction ? "prediction" : job ? "embedding" : "input");
@@ -54,7 +48,7 @@ export default function PredictionView() {
     try {
       const started = await api.startPredict({ date, region_geojson: region.geojson });
       const result = await pollJob(started.job_id, (progress, stage, message) =>
-        setJob({ progress, stage: stage || "", ...(message ? {} : {}) })
+        setJob({ progress, stage: stage || "", message })
       );
       setPrediction(result);
       pushToast({
@@ -111,12 +105,12 @@ export default function PredictionView() {
         )}
 
         {job && (
-          <div className="mt-4 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
-            <ProgressBar
-              value={job.progress}
-              label={`${STAGE_LABELS[job.stage] ?? job.stage} ... ${job.progress}%`}
-            />
-          </div>
+          <PredictionProgress
+            progress={job.progress}
+            stage={job.stage}
+            message={job.message}
+            mcPasses={meta.mc_passes}
+          />
         )}
       </Card>
 

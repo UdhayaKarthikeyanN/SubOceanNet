@@ -12,7 +12,7 @@ const STAGES = [
   {
     id: "embedding",
     n: "02",
-    title: "AI EMBEDDING",
+    title: "DEEP LEARNING FRAMEWORK",
     sub: "encoder -> latent vector -> decoder",
     color: "#a78bfa",
   },
