@@ -1,5 +1,11 @@
 # SubOceanNet
 
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.5-EE4C2C?logo=pytorch&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-frontend-61DAFB?logo=react&logoColor=black)
+![Leaflet](https://img.shields.io/badge/Leaflet-map-199900?logo=leaflet&logoColor=white)
+
 **Satellite-based 3D subsurface ocean temperature reconstruction for the North Indian Ocean.**
 
 SubOceanNet learns a mapping from **7 satellite-observed surface variables** to
@@ -21,6 +27,61 @@ winds U,V                                              (ONLY temperature is outp
   one exception: the frontend loads real coastline tiles from Esri (see
   "Map tiles" below), so a browser with internet access is needed to see
   the map itself.
+
+---
+
+<details>
+<summary><b>Contents</b></summary>
+
+- [Screenshots](#screenshots)
+- [Quick start (Windows)](#quick-start-windows)
+- [Demo mode vs real data (config-only swap)](#demo-mode-vs-real-data-config-only-swap)
+- [Architecture & code map](#architecture--code-map)
+- [API overview](#api-overview-interactive-docs-at-http1270018000docs)
+- [Training](#training)
+- [Using the UI](#using-the-ui)
+- [Running in production](#running-in-production-single-server-real-domain)
+- [Map tiles](#map-tiles)
+- [Troubleshooting](#troubleshooting)
+- [Non-goals](#non-goals)
+
+</details>
+
+## Screenshots
+
+<table>
+<tr>
+<td width="50%">
+
+**Input Layers** — the 7 satellite-derived surface variables, live
+<img src="docs/screenshots/input-layers.png" width="100%">
+
+</td>
+<td width="50%">
+
+**Prediction Maps** — reconstructed temperature at any of 15 depths
+<img src="docs/screenshots/prediction-map.png" width="100%">
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Live prediction progress** — real MC-dropout stochastic passes, tracked as they run
+<img src="docs/screenshots/prediction-loading.png" width="100%">
+
+</td>
+<td width="50%">
+
+**3D Volume** — isometric view of the full predicted temperature field
+<img src="docs/screenshots/volume-3d.png" width="100%">
+
+</td>
+</tr>
+</table>
+
+**Time Series** — predicted temperature through time, per depth, at up to 5 map points
+<p align="center"><img src="docs/screenshots/time-series.png" width="85%"></p>
 
 ---
 
