@@ -10,7 +10,7 @@
 SubOceanNet learns a mapping from 7 satellite-observed surface variables (sea
 temperature, salinity, sea level, currents, wind) to subsurface temperature at
 15 depth levels — from the surface down to 1,000 m — using a CNN encoder–decoder
-with Monte-Carlo dropout uncertainty. Everything runs locally: FastAPI backend,
+with Monte-Carlo  dropout uncertainty. Everything runs locally: FastAPI backend,
 React + Leaflet frontend, PyTorch model.
 
 ## Screenshots
